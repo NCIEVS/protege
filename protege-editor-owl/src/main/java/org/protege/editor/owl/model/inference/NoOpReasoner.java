@@ -10,7 +10,8 @@ import javax.annotation.Nonnull;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Author: Matthew Horridge<br>
@@ -194,6 +195,11 @@ public class NoOpReasoner implements OWLReasoner {
     @Nonnull
     public NodeSet<OWLClass> getSuperClasses(@Nonnull OWLClassExpression ce, boolean direct) throws InconsistentOntologyException, ClassExpressionNotInProfileException, ReasonerInterruptedException, TimeOutException {
         return new OWLClassNodeSet();
+    }
+
+    @Nonnull
+    public Map<OWLClass, NodeSet<OWLClass>> getAllSuperClasses(boolean direct) {
+        return new HashMap<>();
     }
 
     @Nonnull
