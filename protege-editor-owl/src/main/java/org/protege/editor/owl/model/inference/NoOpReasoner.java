@@ -8,10 +8,9 @@ import uk.ac.manchester.cs.owl.owlapi.OWLDataFactoryImpl;
 
 import javax.annotation.Nonnull;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.Map;
-import java.util.HashMap;
 
 /**
  * Author: Matthew Horridge<br>
@@ -198,8 +197,8 @@ public class NoOpReasoner implements OWLReasoner {
     }
 
     @Nonnull
-    public Map<OWLClass, NodeSet<OWLClass>> getAllSuperClasses(boolean direct) {
-        return new HashMap<>();
+    public Set<OWLSubClassOfAxiom> getAllInferredSuperClasses(boolean direct) {
+        return new HashSet<>();
     }
 
     @Nonnull
