@@ -23,6 +23,12 @@ import java.util.List;
 public class InferredAxiomsFrameSectionRow extends AbstractOWLFrameSectionRow<OWLOntology, OWLAxiom, OWLAxiom> {
 
     private OWLAxiom axiom;
+    
+    private String editingHint = "";
+    
+    public void setEditingHint(String s) {
+    	editingHint = s;
+    }
 
 
     public InferredAxiomsFrameSectionRow(OWLEditorKit owlEditorKit, OWLFrameSection<OWLOntology, OWLAxiom, OWLAxiom> section, OWLOntology ontology, OWLOntology rootObject,
@@ -43,6 +49,11 @@ public class InferredAxiomsFrameSectionRow extends AbstractOWLFrameSectionRow<OW
 
 
     public List<OWLAxiom> getManipulatableObjects() {
+  
         return Arrays.asList(axiom);
+    }
+    
+    public String getRendering() {
+    	return super.getRendering() + editingHint;
     }
 }

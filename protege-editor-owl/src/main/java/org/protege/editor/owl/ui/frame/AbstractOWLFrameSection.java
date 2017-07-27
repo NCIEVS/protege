@@ -314,7 +314,9 @@ public abstract class AbstractOWLFrameSection<R extends Object, A extends OWLAxi
     			(VacuousAxiomVisitor.isVacuousAxiom(row.getAxiom()) || VacuousAxiomVisitor.involvesInverseSquared(row.getAxiom()))) {
     		return;
     	}
+    
     	addRow(row);
+    	
     }
 
 

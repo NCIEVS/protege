@@ -1,19 +1,24 @@
 package org.protege.editor.owl.ui.frame;
 
 import org.protege.editor.owl.OWLEditorKit;
+import org.protege.editor.owl.model.inference.VacuousAxiomVisitor;
 import org.protege.editor.owl.ui.editor.OWLObjectEditor;
 import org.semanticweb.owlapi.apibinding.OWLManager;
+import org.semanticweb.owlapi.model.AxiomType;
 import org.semanticweb.owlapi.model.IRI;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLClass;
 import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyManager;
+import org.semanticweb.owlapi.model.OWLSubClassOfAxiom;
 //import org.semanticweb.owlapi.model.*;
 import org.semanticweb.owlapi.util.*;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
 import java.util.TreeSet;
 /*
  * Copyright (C) 2007, University of Manchester
@@ -46,7 +51,8 @@ public class InferredAxiomsFrameSection extends AbstractOWLFrameSection<OWLOntol
 
 
     public OWLObjectEditor<OWLAxiom> getObjectEditor() {
-        return null;
+    	return null;
+        
     }
 
 
@@ -72,13 +78,79 @@ public class InferredAxiomsFrameSection extends AbstractOWLFrameSection<OWLOntol
                 }
                 
                 if (add) {
-                	addInferredRowIfNontrivial(new InferredAxiomsFrameSectionRow(getOWLEditorKit(), this, null, getRootObject(), ax));
+                	doctorAndAdd(new InferredAxiomsFrameSectionRow(getOWLEditorKit(), this, null, getRootObject(), ax));
+                	
                 }
             }
         }
         catch (Exception e) {
             e.printStackTrace();
         }
+    }
+    
+    private void doctorAndAdd(InferredAxiomsFrameSectionRow row) {
+    	if (row.isInferred() && 
+    			(VacuousAxiomVisitor.isVacuousAxiom(row.getAxiom()) || VacuousAxiomVisitor.involvesInverseSquared(row.getAxiom()))) {
+    		return;
+    	}
+    	if (isInconsistent(row.getAxiom())) {
+    		row.setEditingHint(" - needs repair");
+    		addInferredRowIfNontrivial(row);
+    	} else {
+    		row.setEditingHint(" - Add Axiom");
+    		addInferredRowIfNontrivial(row);
+    		// now possibly make a new remove axiom for each redudant link
+    		List<OWLAxiom> supsToRemove = findCommonParents(row.getAxiom());
+    		for (OWLAxiom ax : supsToRemove) {
+    			InferredAxiomsFrameSectionRow remRow = 
+    					new InferredAxiomsFrameSectionRow(getOWLEditorKit(), this, null, getRootObject(), ax);
+    			remRow.setEditingHint(" - Remove Axiom");
+    			addInferredRowIfNontrivial(remRow);
+    		}
+    	}
+    }
+    
+    private boolean isInconsistent(OWLAxiom ax) {
+    	if (ax.isOfType(AxiomType.SUBCLASS_OF)) {
+    		OWLSubClassOfAxiom subax = (OWLSubClassOfAxiom) ax;
+    		return subax.getSuperClass().isOWLNothing();    
+    	}
+    	return false;
+    }
+    
+    private List<OWLClass> getAssertedParents(OWLClass cls) {
+    	List<OWLClass> parents = new ArrayList<OWLClass>();
+    	Set<OWLSubClassOfAxiom> axs = 
+    			getOWLModelManager().getActiveOntology().getSubClassAxiomsForSubClass(cls);
+    	
+    	for(OWLSubClassOfAxiom ax : axs) {
+    		if (!ax.getSuperClass().isAnonymous()) {
+    			parents.add(ax.getSuperClass().asOWLClass());
+    		}
+    	}
+    	
+    	return parents;
+    }
+    
+    private List<OWLAxiom> findCommonParents(OWLAxiom newAxiom) {
+    	List<OWLAxiom> results = new ArrayList<OWLAxiom>();
+    	if (newAxiom.isOfType(AxiomType.SUBCLASS_OF)) {
+    		OWLSubClassOfAxiom subax = (OWLSubClassOfAxiom) newAxiom;
+    		OWLClass cls = subax.getSubClass().asOWLClass();
+    		if (!subax.getSuperClass().isAnonymous()) {
+    			OWLClass newParent = subax.getSuperClass().asOWLClass();
+    			List<OWLClass> assertedParents = getAssertedParents(cls);
+    			List<OWLClass> newParentAssertedParents = getAssertedParents(newParent);
+    			for (OWLClass ap : assertedParents) {
+    				if (newParentAssertedParents.contains(ap)) {
+    					OWLAxiom newAx = 
+    							getOWLModelManager().getOWLDataFactory().getOWLSubClassOfAxiom(cls, ap);
+    					results.add(newAx);
+    				}
+    			}    			
+    		}
+    	}
+    	return results;
     }
 
     @Override
