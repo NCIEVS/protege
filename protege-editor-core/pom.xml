@@ -21,9 +21,17 @@
         <protege-server.version>3.0.0-SNAPSHOT</protege-server.version>
     </properties>
     
+    <repositories>
+        <repository>
+            <id>ncimvn</id>
+            <name>NCI Maven Nexus</name>
+            <url>https://ncimvn.nci.nih.gov</url>
+        </repository>
+    </repositories>
+    
 	<dependencies>
 
-		<!-- 
+		<!--
 		<dependency>
 			<groupId>edu.stanford.protege</groupId>
 			<artifactId>protege-launcher</artifactId>
@@ -59,7 +67,7 @@
 		
 		<dependency>
 			<groupId>org.eclipse.equinox</groupId>
-			<artifactId>org.eclipse.equinox.nonosgi.registry</artifactId>
+			<artifactId>nonosgi.registry</artifactId>
 			<version>1.0.0</version>
 		</dependency>
 		
