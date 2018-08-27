@@ -59,7 +59,7 @@
 		
 		<dependency>
 			<groupId>org.eclipse.equinox</groupId>
-			<artifactId>nonosgi.registry</artifactId>
+			<artifactId>org.eclipse.equinox.nonosgi.registry</artifactId>
 			<version>1.0.0</version>
 		</dependency>
 		
