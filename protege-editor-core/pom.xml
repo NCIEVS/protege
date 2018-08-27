@@ -21,14 +21,6 @@
         <protege-server.version>3.0.0-SNAPSHOT</protege-server.version>
     </properties>
     
-    <repositories>
-        <repository>
-            <id>ncimvn</id>
-            <name>NCI Maven Nexus</name>
-            <url>https://ncimvn.nci.nih.gov</url>
-        </repository>
-    </repositories>
-    
 	<dependencies>
 
 		<!--
