@@ -20,7 +20,13 @@
         <lucene.version>7.1.0</lucene.version>
         <protege-server.version>3.0.0-SNAPSHOT</protege-server.version>
     </properties>
-    
+        <repositories>
+        <repository>
+            <id>ncimvn</id>
+            <name>NCI Maven Nexus</name>
+            <url>https://ncimvn.nci.nih.gov/nexus/content/groups/public</url>
+        </repository>
+    </repositories>
 	<dependencies>
 
 		<!--
@@ -59,7 +65,7 @@
 		
 		<dependency>
 			<groupId>org.eclipse.equinox</groupId>
-			<artifactId>org.eclipse.equinox.nonosgi.registry</artifactId>
+			<artifactId>nonosgi.registry</artifactId>
 			<version>1.0.0</version>
 		</dependency>
 		
