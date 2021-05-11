@@ -127,14 +127,15 @@ public class OWLObjectTree<N extends OWLObject> extends JTree implements OWLObje
                     reload();
                 }
                 if (e.isPopupTrigger()) {
-                	ensureSelected(e.getX(), e.getY());		// addresses #359
+//                	ensureSelected(e.getX(), e.getY());		// addresses #359
                     showPopupMenu(e);
                 }
             }
 
             public void mousePressed(MouseEvent e) {
+               	ensureSelected(e.getX(), e.getY());
                 if (e.isPopupTrigger()) {
-                	ensureSelected(e.getX(), e.getY());
+//                	ensureSelected(e.getX(), e.getY());
                 	showPopupMenu(e);
                 }
                 if (e.isAltDown()) {
