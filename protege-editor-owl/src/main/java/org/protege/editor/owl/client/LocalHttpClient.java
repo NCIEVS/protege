@@ -860,21 +860,21 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		builder.addHeader(ServerProperties.SNAPSHOT_CHECKSUM_HEADER, snapshotChecksum.get());
 
 		int count = 0;
-		int tries = 3;
-		int lastTry = tries;
+		final int tries = 3;
 		Response response = null;
 
 		do {
 			try {
 				count++;
 				response = httpClient.newCall(builder.build()).execute();
+				break;
 				}
 			catch (SocketTimeoutException e) {
 				logger.error(e.getMessage(), e);
-				try { Thread.sleep(2000); } catch (InterruptedException f) {logger.error(f.getMessage(), f);}
-				if (tries == lastTry ) {
+				if (count == tries ) {
 					throw new ClientRequestException("Maximum number of SocketTimeoutExceptions reached", e);
 					}
+				try { Thread.sleep(2000); } catch (InterruptedException f) {logger.error(f.getMessage(), f);}
 				}
 			catch (IOException e) {
 				logger.error(e.getMessage(), e);
