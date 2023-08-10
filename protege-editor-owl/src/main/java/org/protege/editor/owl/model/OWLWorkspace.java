@@ -625,32 +625,34 @@ public class OWLWorkspace extends TabbedWorkspace implements SendErrorReportHand
     }
 
     private void addReasonerListener(final JMenuBar menuBar) {
-        final IExtensionRegistry registry = PluginUtilities.getInstance().getExtensionRegistry();
-        final IExtensionPoint point = registry.getExtensionPoint(ProtegeOWL.ID, ProtegeOWLReasonerPlugin.REASONER_PLUGIN_TYPE_ID);
+    	final IExtensionRegistry registry = PluginUtilities.getInstance().getExtensionRegistry();
+    	final IExtensionPoint point = registry.getExtensionPoint(ProtegeOWL.ID, ProtegeOWLReasonerPlugin.REASONER_PLUGIN_TYPE_ID);
 
-        registry.addListener(new IRegistryEventListener() {
+    	if (point != null) {
+    		registry.addListener(new IRegistryEventListener() {
 
-            public void added(IExtension[] extensions) {
-                OWLReasonerManagerImpl reasonerManager = (OWLReasonerManagerImpl) getOWLModelManager().getOWLReasonerManager();
-                Set<ProtegeOWLReasonerPlugin> plugins = new HashSet<>();
-                for (IExtension extension : extensions) {
-                    plugins.add(new ProtegeOWLReasonerPluginJPFImpl(getOWLModelManager(), extension));
-                }
-                reasonerManager.addReasonerFactories(plugins);
-                rebuildReasonerMenu(menuBar);
-                menuBar.repaint();
-            }
+    			public void added(IExtension[] extensions) {
+    				OWLReasonerManagerImpl reasonerManager = (OWLReasonerManagerImpl) getOWLModelManager().getOWLReasonerManager();
+    				Set<ProtegeOWLReasonerPlugin> plugins = new HashSet<>();
+    				for (IExtension extension : extensions) {
+    					plugins.add(new ProtegeOWLReasonerPluginJPFImpl(getOWLModelManager(), extension));
+    				}
+    				reasonerManager.addReasonerFactories(plugins);
+    				rebuildReasonerMenu(menuBar);
+    				menuBar.repaint();
+    			}
 
-            public void added(IExtensionPoint[] extensionPoints) {
-            }
+    			public void added(IExtensionPoint[] extensionPoints) {
+    			}
 
-            public void removed(IExtension[] extensions) {
-            }
+    			public void removed(IExtension[] extensions) {
+    			}
 
-            public void removed(IExtensionPoint[] extensionPoints) {
-            }
+    			public void removed(IExtensionPoint[] extensionPoints) {
+    			}
 
-        }, point.getUniqueIdentifier());
+    		}, point.getUniqueIdentifier());
+    	}
 
     }
 

@@ -838,10 +838,12 @@ public class OWLModelManagerImpl extends AbstractModelManager implements OWLMode
     public OWLModelManagerEntityRenderer getOWLEntityRenderer() {
         if (entityRenderer == null) {
             try {
-                OWLRendererPreferences preferences = OWLRendererPreferences.getInstance();
-                RendererPlugin plugin = preferences.getRendererPlugin();
-                entityRenderer = plugin.newInstance();
-                loadRenderer();
+            	OWLRendererPreferences preferences = OWLRendererPreferences.getInstance();
+            	RendererPlugin plugin = preferences.getRendererPlugin();
+            	if (plugin != null) {
+            		entityRenderer = plugin.newInstance();
+            		loadRenderer();
+            	}
             } catch (ClassNotFoundException | InstantiationException | IllegalAccessException e) {
                 logger.error(e.getMessage());
             }
