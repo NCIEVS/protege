@@ -3,9 +3,66 @@
 
 <plugin>
 
+
+    <extension id="OWLEditorKitFactory"
+               point="org.protege.editor.core.application.EditorKitFactory">
+        <label value="OWL ontology"/>
+        <class value="org.protege.editor.owl.OWLEditorKitFactory"/>
+    </extension>
+    
+    	<!-- Server menu -->
+
+	<extension id="client.Server"
+        	   name="Top Level Server Menu"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+    	<name value="Server"/>
+      	<path value="/SlotG"/>
+      	<editorKitId value="OWLEditorKit"/>
+   	</extension>
+   
+   	<extension id="client.Login"
+               name="Login Menu"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+		<name value="Login"/>
+      	<path value="org.protege.editor.owl.client.Server/SlotA-G"/>
+      	<editorKitId value="OWLEditorKit"/>
+      	<class value="org.protege.editor.owl.client.action.LoginAction"/>
+	</extension>
+
+	<extension id="client.Logout"
+               name="Logout Menu"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+		<name value="Logout"/>
+      	<path value="org.protege.editor.owl.client.Server/SlotA-I"/>
+      	<editorKitId value="OWLEditorKit"/>
+      	<class value="org.protege.editor.owl.client.action.LogoutAction"/>
+	</extension>
+	
+	
+	<extension id="client.PauseServer"
+               name="Pause Server"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+		<name value="Pause-server"/>
+      	<path value="org.protege.editor.owl.client.Server/SlotD-F"/>
+      	<editorKitId value="OWLEditorKit"/>
+      	<class value="org.protege.editor.owl.client.action.PauseServerAction"/>
+      	<checkbox value="true"/>
+	</extension>		
+
+	<!-- Editor Hook -->
+
+	<extension id="client.ClientSession"
+			   name="Client Session"
+			   point="org.protege.editor.core.application.EditorKitHook">
+		<class value="org.protege.editor.owl.client.ClientSession"/>
+		<editorKitId value="OWLEditorKit"/>
+	</extension>
+
+<!--
     <extension-point id="inference_reasonerfactory"
                      name="Reasoner Factory"
                      schema="schema/ReasonerFactory.exsd"/>
+
     <extension-point id="inference_preferences" 
                      name="Reasoner Preferences" 
                      schema="schema/inference_preferences.exsd"/>
@@ -25,23 +82,21 @@
     <extension-point id="ui_editor_description" name="OWL Description Editor" schema="schema/UI_Editor_Description.exsd"/>
 
 	<extension-point id="repository" name="OWL Ontology Repository Factory"/>
+
     <extension-point id="entity_renderer" name="Renderer Plugin" schema="schema/entity_renderer.exsd"/>
+
     <extension-point id="ExtraReasonerMenuAction" name="Extra Reasoner Menu Item" />
 
     <extension-point id="searchmanager" name="Search Manager"/>
+ -->
     <!-- PLUGINS -->
 
 
 
-    <extension id="OWLEditorKitFactory"
-               point="org.protege.editor.core.application.EditorKitFactory">
-        <label value="OWL ontology"/>
-        <class value="org.protege.editor.owl.OWLEditorKitFactory"/>
-    </extension>
 
 
     <!-- Class Description Editors -->
-
+<!--
     <extension id="OWLClassExpressionExpressionEditor"
                point="org.protege.editor.owl.ui_editor_description">
         <label value="Class expression editor"/>
@@ -72,12 +127,14 @@
         <class value="org.protege.editor.owl.ui.editor.OWLDataRestrictionCreatorPanel"/>
         <index value="D"/>
     </extension>
+    
+-->
 
 	
 	<!-- View menu -->
 
     <!-- Renderer prefs in View menu-->
-
+<!--
     <extension id="ui.preferences.renderer"
                point="org.protege.editor.core.application.preferencespanel">
         <label value="Renderer"/>
@@ -103,6 +160,7 @@
         <path value="/SlotCR-A"/>
 	    <editorKitId value="OWLEditorKit"/>
     </extension>
+
     
     <extension id="ui.view.menu.byid"
                point="org.protege.editor.core.application.EditorKitMenuAction">
@@ -162,7 +220,7 @@
         <path value="org.protege.editor.owl.ui.view.menu/SlotAAA-A"/>
         <class value="org.protege.editor.owl.ui.renderer.InlineAnnotationRenderingAction"/>
         <editorKitId value="OWLEditorKit"/>
-        <!--<dynamic value="true"/>-->
+        <dynamic value="true"/>
         <checkbox value="true"/>
     </extension>
 
@@ -173,7 +231,7 @@
         <path value="org.protege.editor.owl.ui.view.menu/SlotAAA-AB"/>
         <class value="org.protege.editor.owl.ui.renderer.InlineDatatypeRenderingAction"/>
         <editorKitId value="OWLEditorKit"/>
-        <!--<dynamic value="true"/>-->
+        <dynamic value="true"/>
         <checkbox value="true"/>
     </extension>
 
@@ -197,9 +255,10 @@
         <editorKitId value="OWLEditorKit"/>
         <checkbox value="true"/>
     </extension>
+ -->
 
     <!-- Active ontology strategies in View menu-->
-
+<!--
     <extension id="ontologies.activeontology"
                 point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Show only the active ontology"/>
@@ -240,16 +299,21 @@
         <path value="org.protege.editor.owl.ui.view.menu/SlotB-A"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+    
+-->
 
 
     <!-- Entity Renderers -->
-    
+   
+  <!-- 
     <extension id="OWLEntityRenderer"
     		   point="org.protege.editor.owl.entity_renderer">
        <name value="Render by Entity IRI short name (Id)"/>
        <class value="org.protege.editor.owl.ui.renderer.OWLEntityRendererImpl"/>
        <sortPosition value="A"/>
     </extension>
+    
+  
 
     <extension id="OWLEntityQNameRenderer"
     		   point="org.protege.editor.owl.entity_renderer">
@@ -272,10 +336,12 @@
        <class value="org.protege.editor.owl.ui.renderer.PrefixedOWLEntityAnnotationValueRenderer"/>
        <sortPosition value="D"/>
     </extension>
+-->
 
 
     <!-- Ontology Tab -->
 
+<!--
     <extension id="OWLOntologyTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Active Ontology"/>
@@ -285,9 +351,12 @@
         <protegeDefaultTab value="true"/>
         <defaultViewConfigFileName value="viewconfig-ontologytab.xml"/>
     </extension>
+    
+-->
 
     <!-- Entities Tab -->
 
+<!--
     <extension id="OWLEntitesTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Entities"/>
@@ -297,9 +366,12 @@
         <protegeDefaultTab value="true"/>
         <defaultViewConfigFileName value="viewconfig-entitiestab.xml"/>
     </extension>
+    
+    -->
 
     <!-- Classes Tab -->
 
+<!--
     <extension id="OWLClassesTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Classes"/>
@@ -308,9 +380,12 @@
         <index value="C"/>
         <defaultViewConfigFileName value="viewconfig-classestab.xml"/>
     </extension>
+    
+-->
 
     <!-- Object Properties Tab -->
 
+<!--
     <extension id="OWLObjectPropertiesTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Object Properties"/>
@@ -319,9 +394,11 @@
         <index value="D"/>
         <defaultViewConfigFileName value="viewconfig-objectpropertiestab.xml"/>
     </extension>
+-->
 
     <!-- Data properties tab -->
 
+  <!--
     <extension id="OWLDataPropertiesTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Data Properties"/>
@@ -330,9 +407,11 @@
         <index value="E"/>
         <defaultViewConfigFileName value="viewconfig-datapropertiestab.xml"/>
     </extension>
+-->
     
     <!-- Annotations properties tab -->
 
+<!--
     <extension id="OWLAnnotationsPropertiesTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Annotation Properties"/>
@@ -341,9 +420,12 @@
         <index value="F"/>
         <defaultViewConfigFileName value="viewconfig-annotationpropertiestab.xml"/>
     </extension>
+    
+-->
 
     <!-- Individuals tab -->
 
+<!--
     <extension id="OWLIndividualsTab"
                point="org.protege.editor.core.application.WorkspaceTab">
         <label value="Individuals by class"/>
@@ -353,13 +435,14 @@
         <protegeDefaultTab value="true"/>
         <defaultViewConfigFileName value="viewconfig-individualstab.xml"/>
     </extension>
+-->
 
 
 
     <!-- Views -->
 
     <!-- Class views -->
-
+<!--
     <extension id="OWLAssertedClassHierarchy"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Class hierarchy"/>
@@ -428,10 +511,12 @@
         <headerColor value="@org.protege.ontologycolor"/>
         <category value="@org.protege.classcategory"/>
     </extension>
+-->
 
 
     <!-- Object property views -->
 
+<!--
     <extension id="OWLObjectPropertyTree"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Object property hierarchy"/>
@@ -493,10 +578,12 @@
         <category value="@org.protege.objectpropertycategory"/>
         <help value="http://protegeproject.github.io/protege/views/object-property-characteristics/"/>
     </extension>
+-->
 
 
     <!-- Data property views -->
 
+<!--
     <extension id="OWLDataPropertyTree"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Data property hierarchy"/>
@@ -544,10 +631,13 @@
         <headerColor value="@org.protege.datapropertycolor"/>
         <category value="@org.protege.datapropertycategory"/>
     </extension>
+    
+-->
 
 
     <!-- Individual views -->
 
+<!--
     <extension id="OWLIndividualsList"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Individuals"/>
@@ -627,10 +717,13 @@
         <headerColor value="@org.protege.individualcolor"/>
         <category value="@org.protege.individualcategory"/>
     </extension>
+    
+-->
 
 
     <!-- Annotation property views -->
 
+<!--
     <extension id="OWLAnnotationPropertyTree"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Annotation property hierarchy"/>
@@ -658,10 +751,13 @@
         <headerColor value="@org.protege.annotationscolor"/>
         <category value="@org.protege.annotationpropertycategory"/>
     </extension>
+    
+-->
 
 
     <!-- Datatype views -->
 
+<!--
     <extension id="OWLDatatypeList"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Datatypes"/>
@@ -689,10 +785,13 @@
         <headerColor value="@org.protege.datatypecolor"/>
         <category value="@org.protege.datatypecategory"/>
     </extension>
+    
+-->
 
 
     <!-- misc views -->
 
+<!--
     <extension id="SelectedEntityView"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Selected entity"/>
@@ -718,9 +817,13 @@
         <navigates value="@org.protege.datapropertycategory"/>
         <navigates value="@org.protege.individualcategory"/>
     </extension>
+    
+-->
 
 
     <!-- Ontology views -->
+    
+ <!--
 
     <extension id="OWLOntologyAnnotationsView"
                point="org.protege.editor.core.application.ViewComponent">
@@ -785,9 +888,11 @@
         <category value="@org.protege.ontologycategory"/>
         <category value="Classification results"/>
     </extension>
+-->
 
     <!-- Renderer views -->
 
+<!--
     <extension id="RDFXML"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="RDF/XML rendering"/>
@@ -820,10 +925,11 @@
         <headerColor value="@org.protege.ontologycolor"/>
         <category value="@org.protege.ontologycategory"/>
     </extension>
+-->
 
 
     <!-- Usage Views -->
-
+<!--
     <extension id="OWLClassUsageView"
                point="org.protege.editor.core.application.ViewComponent">
         <label value="Usage"/>
@@ -871,13 +977,14 @@
         <headerColor value="@org.protege.datatypecolor"/>
         <category value="@org.protege.datatypecategory"/>
     </extension>
-
+-->
 
 
     <!-- Menu items -->
     <!-- File menu -->
 
 
+<!--
     <extension id="openfromURI"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Open from URL..."/>
@@ -896,6 +1003,7 @@
         <class value="org.protege.editor.owl.client.action.OpenFromServerAction"/>
         <toolTip value="Open an ontology from a Protege OWL Server"/>
     </extension>
+ -->
 
     <!--<extension id="closeOntologies"-->
     <!--point="org.protege.editor.core.application.EditorKitMenuAction">-->
@@ -906,7 +1014,7 @@
     <!--<editorKitId value="OWLEditorKit"/>-->
     <!--</extension>-->
 
-
+<!--
     <extension id="change.undo"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Undo"/>
@@ -927,8 +1035,9 @@
         <editorKitId value="OWLEditorKit"/>
         <accelerator value="shift Z"/>
     </extension>
+-->
 
-
+<!--
     <extension id="gatherontologies"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Gather ontologies..."/>
@@ -948,6 +1057,7 @@
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotAB-D"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+ -->
 
     <!--
     <extension id="reloadontology"
@@ -961,6 +1071,7 @@
     </extension>
     -->
 
+<!--
     <extension id="find"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Find..."/>
@@ -1036,10 +1147,11 @@
         <editorKitId value="OWLEditorKit"/>
         <accelerator value="shift C"/>
     </extension>
-
+-->
 
     <!-- Create actions -->
 
+<!--
     <extension id="createnew"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Create new"/>
@@ -1145,9 +1257,10 @@
         <path value="org.protege.editor.core.application.menu.EditMenu/SlotM-H"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
-
+-->
     <!-- Ontology libraries/locations -->
 
+<!--
     <extension id="file.editactiveontologylibrary"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Edit active ontology catalog..."/>
@@ -1175,9 +1288,11 @@
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotD-C"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+-->
 
     <!-- Reasoner menu - built automatically -->
 
+<!--
     <extension id="menu.Reasoner"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Reasoner"/>
@@ -1185,8 +1300,10 @@
         <path value="/SlotD-A"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+-->
 
     <!-- Reasoner Preferences Panel -->
+<!--
     <extension id="ui.preferences.reasoner"
                point="org.protege.editor.core.application.preferencespanel">
         <label value="Reasoner"/>
@@ -1204,9 +1321,11 @@
         <label value="Initialization"/>
         <class value="org.protege.editor.owl.ui.inference.PrecomputePreferencesPanel"/>
     </extension>
+-->
 
     <!-- Refactor menu -->
 
+<!--
     <extension id="menu.Refactor"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Refactor"/>
@@ -1214,8 +1333,9 @@
         <path value="/SlotH-A"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+    -->
 
-
+<!--
     <extension id="deleteentity"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Delete..."/>
@@ -1351,36 +1471,10 @@
         <path value="org.protege.editor.owl.menu.Refactor/SlotE-A"/>
         <editorKitId value="OWLEditorKit"/>
     </extension> 
+-->
 
-	<!-- Server menu -->
 
-	<extension id="client.Server"
-        	   name="Top Level Server Menu"
-               point="org.protege.editor.core.application.EditorKitMenuAction">
-    	<name value="Server"/>
-      	<path value="/SlotG"/>
-      	<editorKitId value="OWLEditorKit"/>
-   	</extension>
-   
-   	<extension id="client.Login"
-               name="Login Menu"
-               point="org.protege.editor.core.application.EditorKitMenuAction">
-		<name value="Login"/>
-      	<path value="org.protege.editor.owl.client.Server/SlotA-G"/>
-      	<editorKitId value="OWLEditorKit"/>
-      	<class value="org.protege.editor.owl.client.action.LoginAction"/>
-	</extension>
-
-	<extension id="client.Logout"
-               name="Logout Menu"
-               point="org.protege.editor.core.application.EditorKitMenuAction">
-		<name value="Logout"/>
-      	<path value="org.protege.editor.owl.client.Server/SlotA-I"/>
-      	<editorKitId value="OWLEditorKit"/>
-      	<class value="org.protege.editor.owl.client.action.LogoutAction"/>
-	</extension>
-
-	
+<!--	
 	<extension id="client.Commit"
                name="Commit Menu"
                point="org.protege.editor.core.application.EditorKitMenuAction">
@@ -1426,41 +1520,30 @@
       	<class value="org.protege.editor.owl.client.action.EnableAutoUpdateAction"/>
       	<checkbox value="true"/>
 	</extension>
+
+-->
 	
-	<extension id="client.PauseServer"
-               name="Pause Server"
-               point="org.protege.editor.core.application.EditorKitMenuAction">
-		<name value="Pause-server"/>
-      	<path value="org.protege.editor.owl.client.Server/SlotD-F"/>
-      	<editorKitId value="OWLEditorKit"/>
-      	<class value="org.protege.editor.owl.client.action.PauseServerAction"/>
-      	<checkbox value="true"/>
-	</extension>		
-
-	<!-- Editor Hook -->
-
-	<extension id="client.ClientSession"
-			   name="Client Session"
-			   point="org.protege.editor.core.application.EditorKitHook">
-		<class value="org.protege.editor.owl.client.ClientSession"/>
-		<editorKitId value="OWLEditorKit"/>
-	</extension>
+<!--
 	<extension id="client.SessionRecorder"
 			   name="Session Recorder"
 			   point="org.protege.editor.core.application.EditorKitHook">
 		<class value="org.protege.editor.owl.client.SessionRecorder"/>
 		<editorKitId value="OWLEditorKit"/>
 	</extension>
+-->
 	
     <!-- Tools menu -->
 
+<!--
     <extension id="menu.tools"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Tools"/>
         <path value="/SlotG-A"/>
         <editorKitId value="any"/>
     </extension>
+-->
 
+<!--
     <extension id="file.usage"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Usage..."/>
@@ -1469,9 +1552,11 @@
         <path value="org.protege.editor.owl.menu.tools/SlotR-B"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+    
+-->
 
 	<!-- Repositories -->
-
+<!--
     <extension id="TONESRepository" point="org.protege.editor.core.application.OntologyRepositoryFactory">
         <class value="org.protege.editor.owl.model.repository.TONESRepositoryFactory"/>
     </extension>
@@ -1489,11 +1574,13 @@
 	<extension id="SingleUriEntry" point="org.protege.editor.owl.repository">
 		<class value="org.protege.editor.owl.model.library.UriEntryManager"/>
 	</extension>
+-->
 
     <!-- Species validation -->
 
 
     <!-- Hierarchy creation -->
+ <!--
     <extension id="menu.CreateClassHierarchy"
                point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Create class hierarchy..."/>
@@ -1520,10 +1607,11 @@
         <path value="org.protege.editor.owl.menu.tools/SlotF-C"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+  -->
 
 
     <!-- Help menu -->
-
+<!--
     <extension id="menu.PluginsMenuItem" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Prot\u00E9g\u00E9 plugins"/>
         <toolTip value="Find plugins in the Prot\u00E9g\u00E9 Wiki plugin library"/>
@@ -1539,6 +1627,7 @@
         <path value="org.protege.editor.core.application.menu.HelpMenu/SlotF-B"/>
         <editorKitId value="any"/>
     </extension>
+    -->
     <!--
 
     <extension id="SPARQLQueryTab">
@@ -1554,7 +1643,7 @@
 
     <!-- Reasoners -->
 
-
+<!--
     <extension id="NoOpReasoner"
                point="org.protege.editor.owl.inference_reasonerfactory">
         <name value="None"/>
@@ -1562,33 +1651,40 @@
         <defaultReasoner value="true"/>
     </extension>
 
+-->
 
 	<!-- Explanation Services -->
 	
+<!--
 	<extension id="InconsistentOntologyManager"
 			   point="org.protege.editor.core.application.EditorKitHook">
 	    <class value="org.protege.editor.owl.ui.explanation.io.InconsistentOntologyManager"/>
 	    <editorKitId value="OWLEditorKit"/>
 	</extension>
+-->
 
 
     <!-- Preferences -->  
 
     <!-- Ontology prefs -->
 
+<!--
     <extension id="ui.ontology.OntologyPreferencesPanel"
                point="org.protege.editor.core.application.preferencespanel">
         <label value="New Ontologies"/>
         <class value="org.protege.editor.owl.ui.ontology.OntologyPreferencesPanel"/>
     </extension>
+-->
 
     <!-- Finder prefs -->
 
+<!--
     <extension id="ui.general.prefs"
                point="org.protege.editor.core.application.preferencespanel">
         <label value="General"/>
         <class value="org.protege.editor.owl.ui.preferences.GeneralPreferencesPanel"/>
     </extension>
+
 
     <extension id="ui.user.prefs"
                point="org.protege.editor.core.application.preferencespanel">
@@ -1601,9 +1697,11 @@
         <label value="New Entities Metadata"/>
         <class value="org.protege.editor.owl.ui.annotation.EntityCreationMetadataPreferencesPanel"/>
     </extension>
+-->
 
     <!-- Move axioms kits -->
 
+<!--
     <extension id="MoveAxiomsByReference"
                point="org.protege.editor.owl.moveaxiomskit">
         <name value="Axioms by reference (select entities from the ontology)" />
@@ -1631,9 +1729,11 @@
         <name value="Default search"/>
         <class value="org.protege.editor.owl.model.search.impl.DefaultSearchManager"/>
     </extension>
+ -->
 
 
     <!-- Context -->
+ <!--
 
     <extension id="Add SubClass"
                point="org.protege.editor.core.application.EditorKitMenuAction">
@@ -1761,6 +1861,7 @@
         <path value="[AssertedDataPropertyHierarchy]/SlotD-C"/>
         <editorKitId value="OWLEditorKit"/>
     </extension>
+-->
 
 
 </plugin>

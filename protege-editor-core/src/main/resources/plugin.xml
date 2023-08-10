@@ -12,14 +12,18 @@
    <extension-point id="EditorKitMenuAction"
                     name="EditorKitMenuAction"
                     schema="schema/EditorKitMenuAction.exsd"/>
+   <!--
    <extension-point id="ToolBarAction" name="ToolBarAction"
                     schema="schema/ToolBarAction.exsd"/>
+   -->
    <extension-point id="preferencespanel" 
                     name="preferencespanel"
                     schema="schema/preferencespanel.exsd"/>
+   
    <extension-point id="EditorKitHook"
                      name="EditorKit Hook"
                      schema="schema/EditorKitHook.exsd"/>
+   <!--
    <extension-point id="OntologyRepositoryFactory" 
                     name="Ontology Repository Factory" 
                     schema="schema/OntologyRepositoryFactory.exsd"/>
@@ -29,6 +33,7 @@
    <extension-point id="OtherStartupActions"
                     name="OtherStartupActions" 
                     schema="schema/OtherStartupActions.exsd"/>
+   -->
 
     <!-- Set up standard menus -->
 
@@ -44,15 +49,6 @@
       <editorKitId value="any"/>
    </extension>
 
-    <extension id="menu.file.new" 
-               point="org.protege.editor.core.application.EditorKitMenuAction">
-        <name value="New..."/>
-        <toolTip value="Create a new empty ontology"/>
-        <class value="org.protege.editor.core.ui.action.NewAction"/>
-        <path value="org.protege.editor.core.application.menu.FileMenu/SlotAA-E"/>
-        <editorKitId value="any"/>
-        <accelerator value="N"/>
-    </extension>
 
     <extension id="menu.file.open" 
     		   point="org.protege.editor.core.application.EditorKitMenuAction">
@@ -103,6 +99,7 @@
     </extension>
 
 
+
     <extension id="menu.plugins" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Check for plugins..."/>
         <toolTip value="Search for plugin downloads and updates"/>
@@ -110,9 +107,51 @@
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotP-A"/>
         <editorKitId value="any"/>
     </extension>
+    
+     <!-- Autoupdate preferences -->
+
+
+    <extension id="ui.preferences.update"
+               point="org.protege.editor.core.application.preferencespanel">
+        <label value="Plugins"/>
+        <class value="org.protege.editor.core.update.PluginPreferencesPanel"/>
+    </extension>
+
+    
+    <!-- Other startup actions --> 
+ 
+    <extension id ="AltCheckForPluginsAction"
+               point="org.protege.editor.core.application.OtherStartupActions">
+       <name value="Check for plugins..."/>
+       <class value="org.protege.editor.core.ui.action.start.CheckPluginsAction"/>
+       <sortIndex value="B"/>
+    </extension>
+    
+    <extension id="ResetPreferencesAction"
+               point="org.protege.editor.core.application.OtherStartupActions">
+        <name value="Reset Protege preferences..."/>
+        <class value="org.protege.editor.core.ui.action.start.ResetPreferencesAction"/>
+        <sortIndex value="A"/>
+	</extension>
+	
+    
+    
+<!--
+    <extension id="menu.file.new" 
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+        <name value="New..."/>
+        <toolTip value="Create a new empty ontology"/>
+        <class value="org.protege.editor.core.ui.action.NewAction"/>
+        <path value="org.protege.editor.core.application.menu.FileMenu/SlotAA-E"/>
+        <editorKitId value="any"/>
+        <accelerator value="N"/>
+    </extension>
+-->
+
 
     <!-- Edit menu -->
 
+<!--
     <extension id="menu.EditMenu"
                 point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Edit"/>
@@ -120,9 +159,11 @@
         <path value="/SlotB-A"/>
         <editorKitId value="any"/>
     </extension>
+-->
 
     <!-- Window menu -->
 
+<!--
     <extension id="menu.window" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Window"/>
         <path value="/SlotW-A"/>
@@ -226,15 +267,19 @@
         <class value="org.protege.editor.core.log.ShowLogAction"/>
         <editorKitId value="any"/>
     </extension>
+-->
 
     <!-- Help menu -->
 
+<!--
     <extension id="menu.HelpMenu" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Help"/>
         <path value="/SlotZZZZ-Z"/>
         <editorKitId value="any"/>
     </extension>
+-->
 
+<!--
     <extension id="menu.DocumentationMenuItem" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Prot\u00E9g\u00E9 documentation"/>
         <toolTip value="View online documentation"/>
@@ -259,29 +304,8 @@
         <path value="org.protege.editor.core.application.menu.HelpMenu/SlotH-A"/>
         <editorKitId value="any"/>
     </extension>
+ -->
 
-    <!-- Autoupdate preferences -->
-
-    <extension id="ui.preferences.update"
-               point="org.protege.editor.core.application.preferencespanel">
-        <label value="Plugins"/>
-        <class value="org.protege.editor.core.update.PluginPreferencesPanel"/>
-    </extension>
-    
-    <!-- Other startup actions --> 
-    
-    <extension id ="AltCheckForPluginsAction"
-               point="org.protege.editor.core.application.OtherStartupActions">
-       <name value="Check for plugins..."/>
-       <class value="org.protege.editor.core.ui.action.start.CheckPluginsAction"/>
-       <sortIndex value="B"/>
-    </extension>
-    
-    <extension id="ResetPreferencesAction"
-               point="org.protege.editor.core.application.OtherStartupActions">
-        <name value="Reset Protege preferences..."/>
-        <class value="org.protege.editor.core.ui.action.start.ResetPreferencesAction"/>
-        <sortIndex value="A"/>
-	</extension>
+   
 
 </plugin>
