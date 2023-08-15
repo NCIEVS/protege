@@ -56,6 +56,7 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
     private final AugmentedJTextField ontologyVersionIRIField = new AugmentedJTextField("e.g. http://www.example.com/ontologies/myontology/1.0.0");
 
+    private JButton saveBtn = new JButton("Save");
 
     private boolean updatingViewFromModel = false;
 
@@ -126,22 +127,33 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
             showVersionIRIDocumentation();
         }), new GridBagConstraints(0, 1, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
 
-        ontologyIRIPanel.add(ontologyVersionIRIField, new GridBagConstraints(1, 1, 1, 1, 100.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
+        ontologyIRIPanel.add(ontologyVersionIRIField, new GridBagConstraints(1, 1, 1, 1, 95.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
 
+        //Fix issue #574 - versionIRI in client-server mode
         ontologyVersionIRIField.getDocument().addDocumentListener(new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) {
-                updateModelFromView();
-            }
+	        public void insertUpdate(DocumentEvent e) {
+	            //updateModelFromView();
+	        	buttonAlter();
+	        }
+	
+	        public void removeUpdate(DocumentEvent e) {
+	            //updateModelFromView();
+	        	buttonAlter();
+	        }
+	
+	        public void changedUpdate(DocumentEvent e) {
+	        }
+        });
+        saveBtn.setEnabled(false);
+        ontologyIRIPanel.add(saveBtn, new GridBagConstraints(2, 1, 1, 1, 5.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
 
-            public void removeUpdate(DocumentEvent e) {
-                updateModelFromView();
-            }
-
-            public void changedUpdate(DocumentEvent e) {
+        saveBtn.addActionListener(new ActionListener() {
+        	public void actionPerformed(ActionEvent e)
+            {
+        		updateModelFromView();
             }
         });
-
-
+        
         ontologyIRIPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 20, 0));
 
         list = new OWLOntologyAnnotationList(getOWLEditorKit(), read_only);
@@ -155,6 +167,15 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         updateView();
     }
 
+    //Fix issue #574 - versionIRI in client-server mode
+    private void buttonAlter() {
+        if( !ontologyVersionIRIField.getText().isEmpty()) {
+            saveBtn.setEnabled(true);
+        }else {
+            saveBtn.setEnabled(false);
+        }
+    }
+    
     private void handleComponentHierarchyChanged() {
         if (ontologyIRIShowing != ontologyIRIField.isShowing()) {
             ontologyIRIShowing = ontologyIRIField.isShowing();
