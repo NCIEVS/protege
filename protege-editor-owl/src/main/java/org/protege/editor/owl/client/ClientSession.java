@@ -38,6 +38,7 @@ import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.semanticweb.owlapi.model.OWLOntologyID;
+import org.semanticweb.owlapi.model.SetOntologyID;
 
 //import com.google.common.base.Optional;
 
@@ -81,6 +82,21 @@ public class ClientSession extends OWLEditorKitHook {
     @Override
     public void initialise() throws Exception {
         getEditorKit().getOWLModelManager().addListener(changeActiveProject);        
+    }
+    
+    public void updateActiveOntologyID(SetOntologyID id_ax) {
+    	OWLOntologyID new_id = id_ax.getNewOntologyID();
+    	OWLOntologyID curr_id  = id_ax.getOriginalOntologyID();
+    	if (this.ontologyMap.get(curr_id) != null) {
+    		VersionedOWLOntology ont = ontologyMap.get(curr_id);
+    		ontologyMap.put(new_id, ont);
+    		ontologyMap.remove(curr_id);    		
+    	}
+    	if (this.projectMap.get(curr_id) != null) {
+    		ProjectId ont = projectMap.get(curr_id);
+    		projectMap.put(new_id, ont);
+    		projectMap.remove(curr_id);    		
+    	}
     }
 
     public void fireChangeEvent(EventCategory category) {

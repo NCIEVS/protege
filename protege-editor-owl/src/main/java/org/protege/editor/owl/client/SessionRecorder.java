@@ -19,6 +19,7 @@ import org.protege.editor.owl.model.history.UndoManagerListener;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyID;
 import org.semanticweb.owlapi.model.OWLOntologyManager;
+import org.semanticweb.owlapi.model.SetOntologyID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -149,6 +150,10 @@ public class SessionRecorder extends OWLEditorKitHook implements HistoryManager 
 
 
 	public void logChanges(List<? extends OWLOntologyChange> changes) {
+		if (changes.get(0) instanceof SetOntologyID) {
+			ClientSession.getInstance(getEditorKit()).updateActiveOntologyID(
+					(SetOntologyID) changes.get(0));
+		}
 		if (enabled && !changes.equals(ignoredUpdates)) {
 			switch (typeOfChangeInProgress) {
 			case NORMAL:
