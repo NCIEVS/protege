@@ -56,7 +56,8 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
     private final AugmentedJTextField ontologyVersionIRIField = new AugmentedJTextField("e.g. http://www.example.com/ontologies/myontology/1.0.0");
 
-    private JButton saveBtn = new JButton("Save");
+    private JButton commitBtn = new JButton("Commit");
+    private int initCount = 0;
 
     private boolean updatingViewFromModel = false;
 
@@ -90,13 +91,18 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         }), new GridBagConstraints(0, 0, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.NONE, insets, 0, 0));
         ontologyIRIPanel.add(ontologyIRIField, new GridBagConstraints(1, 0, 1, 1, 100.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
         if (!read_only) {
+        	//Fix issue #574 - versionIRI in client-server mode
         	ontologyIRIField.getDocument().addDocumentListener(new DocumentListener() {
         		public void insertUpdate(DocumentEvent e) {
-        			updateModelFromView();
+        			//updateModelFromView();
+        			initCount++;
+        			buttonAlter();
         		}
 
         		public void removeUpdate(DocumentEvent e) {
-        			updateModelFromView();
+        			//updateModelFromView();
+        			initCount++;
+        			buttonAlter();
         		}
 
         		public void changedUpdate(DocumentEvent e) {
@@ -144,10 +150,10 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 	        public void changedUpdate(DocumentEvent e) {
 	        }
         });
-        saveBtn.setEnabled(false);
-        ontologyIRIPanel.add(saveBtn, new GridBagConstraints(2, 1, 1, 1, 5.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
+        commitBtn.setEnabled(false);
+        ontologyIRIPanel.add(commitBtn, new GridBagConstraints(2, 1, 1, 1, 5.0, 0.0, GridBagConstraints.BASELINE_LEADING, GridBagConstraints.HORIZONTAL, insets, 0, 0));
 
-        saveBtn.addActionListener(new ActionListener() {
+        commitBtn.addActionListener(new ActionListener() {
         	public void actionPerformed(ActionEvent e)
             {
         		updateModelFromView();
@@ -169,10 +175,10 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
     //Fix issue #574 - versionIRI in client-server mode
     private void buttonAlter() {
-        if( !ontologyVersionIRIField.getText().isEmpty()) {
-            saveBtn.setEnabled(true);
+        if( !ontologyVersionIRIField.getText().isEmpty() || (!ontologyIRIField.getText().isEmpty() && initCount > 1)) {
+            commitBtn.setEnabled(true);
         }else {
-            saveBtn.setEnabled(false);
+            commitBtn.setEnabled(false);
         }
     }
     
