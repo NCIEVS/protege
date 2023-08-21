@@ -2,16 +2,38 @@ package org.protege.editor.owl.ui.view.ontology;
 
 import org.protege.editor.core.ui.error.ErrorLogPanel;
 import org.protege.editor.core.ui.util.AugmentedJTextField;
+import org.protege.editor.core.ui.util.JOptionPaneEx;
 import org.protege.editor.core.ui.util.LinkLabel;
 import org.protege.editor.core.ui.workspace.TabbedWorkspace;
+import org.protege.editor.owl.client.ClientSession;
+import org.protege.editor.owl.client.SessionRecorder;
+//import org.protege.editor.owl.client.action.CommitAction.DoCommit;
+import org.protege.editor.owl.client.api.Client;
+import org.protege.editor.owl.client.api.exception.AuthorizationException;
+import org.protege.editor.owl.client.api.exception.ClientRequestException;
+import org.protege.editor.owl.client.api.exception.LoginTimeoutException;
+import org.protege.editor.owl.client.api.exception.SynchronizationException;
+import org.protege.editor.owl.client.event.CommitOperationEvent;
+import org.protege.editor.owl.client.ui.CommitDialogPanel;
+import org.protege.editor.owl.client.ui.UserLoginPanel;
+import org.protege.editor.owl.client.util.ClientUtils;
 import org.protege.editor.owl.model.OntologyAnnotationContainer;
 import org.protege.editor.owl.model.event.EventType;
 import org.protege.editor.owl.model.event.OWLModelManagerChangeEvent;
 import org.protege.editor.owl.model.event.OWLModelManagerListener;
 import org.protege.editor.owl.model.refactor.ontology.EntityIRIUpdaterOntologyChangeStrategy;
+import org.protege.editor.owl.server.api.CommitBundle;
+import org.protege.editor.owl.server.policy.CommitBundleImpl;
+import org.protege.editor.owl.server.versioning.Commit;
+import org.protege.editor.owl.server.versioning.api.ChangeHistory;
+import org.protege.editor.owl.server.versioning.api.DocumentRevision;
+import org.protege.editor.owl.server.versioning.api.VersionedOWLOntology;
+import org.protege.editor.owl.ui.UIHelper;
 import org.protege.editor.owl.ui.ontology.annotation.OWLOntologyAnnotationList;
 import org.protege.editor.owl.ui.view.AbstractOWLViewComponent;
 import org.semanticweb.owlapi.model.*;
+
+import edu.stanford.protege.metaproject.api.AuthToken;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -22,9 +44,16 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.text.NumberFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 
 
 /**
@@ -57,8 +86,7 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
     private final AugmentedJTextField ontologyVersionIRIField = new AugmentedJTextField("e.g. http://www.example.com/ontologies/myontology/1.0.0");
 
     private JButton commitBtn = new JButton("Commit");
-    private int initCount = 0;
-
+    
     private boolean updatingViewFromModel = false;
 
     private boolean updatingModelFromView = false;
@@ -75,7 +103,18 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
     private final OWLOntologyChangeListener ontologyChangeListener = owlOntologyChanges -> handleOntologyChanges(owlOntologyChanges);
 
-
+    private Optional<VersionedOWLOntology> activeVersionOntology = Optional.empty();
+    
+    private static ScheduledExecutorService executorService = Executors
+            .newSingleThreadScheduledExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread th = new Thread(r, "Client-Server Communications");
+                    th.setDaemon(true);
+                    return th;
+                }
+            });
+    
     protected void initialiseOWLView() throws Exception {
     	if (((TabbedWorkspace) getWorkspace()).isReadOnly(this.getView().getPlugin())) {
     		read_only = true;
@@ -95,13 +134,11 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         	ontologyIRIField.getDocument().addDocumentListener(new DocumentListener() {
         		public void insertUpdate(DocumentEvent e) {
         			//updateModelFromView();
-        			initCount++;
         			buttonAlter();
         		}
 
         		public void removeUpdate(DocumentEvent e) {
         			//updateModelFromView();
-        			initCount++;
         			buttonAlter();
         		}
 
@@ -157,6 +194,8 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         	public void actionPerformed(ActionEvent e)
             {
         		updateModelFromView();
+        		//TODO: Commit to server
+        		commitToServer();
             }
         });
         
@@ -175,11 +214,62 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
     //Fix issue #574 - versionIRI in client-server mode
     private void buttonAlter() {
-        if( !ontologyVersionIRIField.getText().isEmpty() || (!ontologyIRIField.getText().isEmpty() && initCount > 1)) {
+    	OWLOntology activeOntology = getOWLEditorKit().getOWLModelManager().getActiveOntology();
+    	
+        Optional<IRI> ontologyIRI = activeOntology.getOntologyID().getOntologyIRI();
+        String ontologyIRIString = ontologyIRI.get().toString();
+        if( !ontologyVersionIRIField.getText().isEmpty() || (!ontologyIRIField.getText().equals(ontologyIRIString))) {
             commitBtn.setEnabled(true);
         }else {
             commitBtn.setEnabled(false);
         }
+    }
+    
+    private void commitToServer() {
+    	Optional<VersionedOWLOntology> activeVersionOntology = Optional.empty();
+    	CommitDialogPanel commitPanel = new CommitDialogPanel();
+        int option = new UIHelper(getOWLEditorKit()).showValidatingDialog("Commit changes", commitPanel, null);
+        if (option == JOptionPane.OK_OPTION) {
+            String comment = commitPanel.getTextArea().getText().trim();
+            activeVersionOntology = Optional.ofNullable(getClientSession().getActiveVersionOntology());
+            if (!comment.isEmpty()) {
+                performCommit(activeVersionOntology.get(), comment);
+            }
+        }
+    }
+    
+    private void performCommit(VersionedOWLOntology vont, String comment) {
+    	try {
+        	//ChangeHistory baseline = activeVersionOntology.get().getChangeHistory();
+        	ChangeHistory baseline = vont.getChangeHistory();
+        	SessionRecorder sessionRecorder = SessionRecorder.getInstance(getOWLEditorKit());
+        	List<OWLOntologyChange> localChanges = ClientUtils.getUncommittedChanges(sessionRecorder, activeOntology(), baseline);
+        	if (localChanges.size() > 0) {
+        		Commit commit = ClientUtils.createCommit(getClientSession().getActiveClient(), comment, localChanges);
+        		DocumentRevision base = vont.getHeadRevision();
+        		CommitBundle commitBundle = new CommitBundleImpl(base, commit);
+        		ChangeHistory hist = getClientSession().getActiveClient().commit(getClientSession().getActiveProject(), commitBundle);
+        		vont.update(hist);
+        		setEnabled(false); // disable the commit action after the changes got committed successfully
+                sessionRecorder.reset();
+                getClientSession().fireCommitPerformedEvent(new CommitOperationEvent(
+                		hist.getHeadRevision(),
+                		hist.getMetadataForRevision(hist.getHeadRevision()),
+                		hist.getChangesForRevision(hist.getHeadRevision())));
+                //showInfoDialog("Commit", "Commit success (uploaded as revision " + changes.getHeadRevision() + ")");
+                JOptionPaneEx.showConfirmDialog(getOWLEditorKit().getWorkspace(), "Commit", new JLabel("Commit success (uploaded as revision " + hist.getHeadRevision() + ")"),
+                        JOptionPane.INFORMATION_MESSAGE, JOptionPane.DEFAULT_OPTION, null);
+        	}
+        	
+    	} catch (Exception e) {
+            //showErrorDialog("Commit error", "Internal error: " + e.getMessage(), e);
+            JOptionPaneEx.showConfirmDialog(getOWLEditorKit().getWorkspace(), "Commit error", new JLabel("Internal error: " + e.getMessage()),
+                    JOptionPane.ERROR_MESSAGE, JOptionPane.DEFAULT_OPTION, null);
+        }
+    }
+    
+    private ClientSession getClientSession() {
+        return ClientSession.getInstance(getOWLEditorKit());
     }
     
     private void handleComponentHierarchyChanged() {
