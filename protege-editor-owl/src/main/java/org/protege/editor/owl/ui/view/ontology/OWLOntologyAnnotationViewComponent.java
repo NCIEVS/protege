@@ -7,15 +7,8 @@ import org.protege.editor.core.ui.util.LinkLabel;
 import org.protege.editor.core.ui.workspace.TabbedWorkspace;
 import org.protege.editor.owl.client.ClientSession;
 import org.protege.editor.owl.client.SessionRecorder;
-//import org.protege.editor.owl.client.action.CommitAction.DoCommit;
-import org.protege.editor.owl.client.api.Client;
-import org.protege.editor.owl.client.api.exception.AuthorizationException;
-import org.protege.editor.owl.client.api.exception.ClientRequestException;
-import org.protege.editor.owl.client.api.exception.LoginTimeoutException;
-import org.protege.editor.owl.client.api.exception.SynchronizationException;
 import org.protege.editor.owl.client.event.CommitOperationEvent;
 import org.protege.editor.owl.client.ui.CommitDialogPanel;
-import org.protege.editor.owl.client.ui.UserLoginPanel;
 import org.protege.editor.owl.client.util.ClientUtils;
 import org.protege.editor.owl.model.OntologyAnnotationContainer;
 import org.protege.editor.owl.model.event.EventType;
@@ -33,8 +26,6 @@ import org.protege.editor.owl.ui.ontology.annotation.OWLOntologyAnnotationList;
 import org.protege.editor.owl.ui.view.AbstractOWLViewComponent;
 import org.semanticweb.owlapi.model.*;
 
-import edu.stanford.protege.metaproject.api.AuthToken;
-
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -48,12 +39,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 
 
 /**
@@ -104,16 +89,6 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
     private final OWLOntologyChangeListener ontologyChangeListener = owlOntologyChanges -> handleOntologyChanges(owlOntologyChanges);
 
     private Optional<VersionedOWLOntology> activeVersionOntology = Optional.empty();
-    
-    private static ScheduledExecutorService executorService = Executors
-            .newSingleThreadScheduledExecutor(new ThreadFactory() {
-                @Override
-                public Thread newThread(Runnable r) {
-                    Thread th = new Thread(r, "Client-Server Communications");
-                    th.setDaemon(true);
-                    return th;
-                }
-            });
     
     protected void initialiseOWLView() throws Exception {
     	if (((TabbedWorkspace) getWorkspace()).isReadOnly(this.getView().getPlugin())) {
@@ -196,6 +171,7 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         		updateModelFromView();
         		//TODO: Commit to server
         		commitToServer();
+        		buttonAlter();
             }
         });
         
@@ -218,13 +194,32 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
     	
         Optional<IRI> ontologyIRI = activeOntology.getOntologyID().getOntologyIRI();
         String ontologyIRIString = ontologyIRI.get().toString();
-        if( !ontologyVersionIRIField.getText().isEmpty() || (!ontologyIRIField.getText().equals(ontologyIRIString))) {
-            commitBtn.setEnabled(true);
-        }else {
-            commitBtn.setEnabled(false);
+        Optional<IRI> ontologyVersionIRI = activeOntology.getOntologyID().getVersionIRI();
+        String ontologyVersionIRIString = null;
+        if (ontologyVersionIRI.isPresent()) {
+        	ontologyVersionIRIString = ontologyVersionIRI.get().toString();
+        }
+        List<OWLOntologyChange> localChanges = getUncommittedLocalChanges();
+        
+        if (localChanges.size() > 0) {
+        	commitBtn.setEnabled(true);
+        }
+        else if (!ontologyIRIField.getText().equals(ontologyIRIString)) {
+        	commitBtn.setEnabled(true);
+        }
+        else { 
+        	if (ontologyVersionIRIField.getText().isEmpty()) {
+        		commitBtn.setEnabled(false);
+        	}
+        	else if (!(ontologyVersionIRIField.getText().equals(ontologyVersionIRIString))) {
+        		commitBtn.setEnabled(true);
+        	} else {
+        		commitBtn.setEnabled(false);
+        	}
         }
     }
     
+    //Fix issue #574 - versionIRI in client-server mode
     private void commitToServer() {
     	Optional<VersionedOWLOntology> activeVersionOntology = Optional.empty();
     	CommitDialogPanel commitPanel = new CommitDialogPanel();
@@ -238,36 +233,50 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
         }
     }
     
+    //Fix issue #574 - versionIRI in client-server mode
+    private List<OWLOntologyChange> getUncommittedLocalChanges() {
+    	List<OWLOntologyChange> localChanges = new ArrayList<OWLOntologyChange>();
+    	Optional<VersionedOWLOntology> activeVersionOntology = Optional.empty();
+    	activeVersionOntology = Optional.ofNullable(getClientSession().getActiveVersionOntology());
+    	if (activeVersionOntology.isPresent()) {
+	    	ChangeHistory baseline = activeVersionOntology.get().getChangeHistory();
+	    	SessionRecorder sessionRecorder = SessionRecorder.getInstance(getOWLEditorKit());
+	    	localChanges = ClientUtils.getUncommittedChanges(sessionRecorder, activeOntology(), baseline); 	
+    	}
+    	return localChanges;
+    }
+    
+    //Fix issue #574 - versionIRI in client-server mode
     private void performCommit(VersionedOWLOntology vont, String comment) {
     	try {
-        	//ChangeHistory baseline = activeVersionOntology.get().getChangeHistory();
         	ChangeHistory baseline = vont.getChangeHistory();
         	SessionRecorder sessionRecorder = SessionRecorder.getInstance(getOWLEditorKit());
         	List<OWLOntologyChange> localChanges = ClientUtils.getUncommittedChanges(sessionRecorder, activeOntology(), baseline);
-        	if (localChanges.size() > 0) {
+    		
+    		if (localChanges.size() > 0) {
         		Commit commit = ClientUtils.createCommit(getClientSession().getActiveClient(), comment, localChanges);
         		DocumentRevision base = vont.getHeadRevision();
         		CommitBundle commitBundle = new CommitBundleImpl(base, commit);
         		ChangeHistory hist = getClientSession().getActiveClient().commit(getClientSession().getActiveProject(), commitBundle);
         		vont.update(hist);
-        		setEnabled(false); // disable the commit action after the changes got committed successfully
+        		//setEnabled(false); // disable the commit action after the changes got committed successfully
                 sessionRecorder.reset();
                 getClientSession().fireCommitPerformedEvent(new CommitOperationEvent(
                 		hist.getHeadRevision(),
                 		hist.getMetadataForRevision(hist.getHeadRevision()),
                 		hist.getChangesForRevision(hist.getHeadRevision())));
-                //showInfoDialog("Commit", "Commit success (uploaded as revision " + changes.getHeadRevision() + ")");
+                
                 JOptionPaneEx.showConfirmDialog(getOWLEditorKit().getWorkspace(), "Commit", new JLabel("Commit success (uploaded as revision " + hist.getHeadRevision() + ")"),
                         JOptionPane.INFORMATION_MESSAGE, JOptionPane.DEFAULT_OPTION, null);
         	}
         	
     	} catch (Exception e) {
-            //showErrorDialog("Commit error", "Internal error: " + e.getMessage(), e);
+            
             JOptionPaneEx.showConfirmDialog(getOWLEditorKit().getWorkspace(), "Commit error", new JLabel("Internal error: " + e.getMessage()),
                     JOptionPane.ERROR_MESSAGE, JOptionPane.DEFAULT_OPTION, null);
         }
     }
-    
+
     private ClientSession getClientSession() {
         return ClientSession.getInstance(getOWLEditorKit());
     }
@@ -463,7 +472,9 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
     private void handleOntologyChanges(List<? extends OWLOntologyChange> changes) {
         for (OWLOntologyChange change : changes) {
-            change.accept(new OWLOntologyChangeVisitor() {
+        	//Fix issue #574 - versionIRI in client-server mode
+            buttonAlter();
+        	change.accept(new OWLOntologyChangeVisitor() {
                 @Override
                 public void visit(SetOntologyID change) {
                     updateView();
