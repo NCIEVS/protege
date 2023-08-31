@@ -112,7 +112,7 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 	/**
 	 * The constructor
 	 */
-	public LocalHttpClient(String username, String password, String serverAddress, boolean admin)
+	public LocalHttpClient(String username, String password, String serverAddress)
 		throws LoginTimeoutException, AuthorizationException, ClientRequestException {
 		httpClient = new OkHttpClient.Builder()
 				.writeTimeout(1800, TimeUnit.SECONDS)
@@ -135,7 +135,7 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 			serverAddress = "https://" + serverAddress;
 		}
 		this.serverAddress = serverAddress;
-		login(username, password, admin);
+		login(username, password, true);
 		initConfig();
 		initAuthToken();
 		LocalHttpClient.currentHttpClient = this;

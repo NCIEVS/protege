@@ -39,7 +39,7 @@ public class UserLoginPanel extends JPanel implements VerifiedInputEditor {
     private boolean currentlyValid = false;
     private List<InputVerificationStatusChangedListener> listeners = new ArrayList<>();
     
-    private final JCheckBox loginAsAdmin = new JCheckBox("Login as admin user");
+    //private final JCheckBox loginAsAdmin = new JCheckBox("Login as admin user");
 
     /**
      * Constructor
@@ -71,7 +71,7 @@ public class UserLoginPanel extends JPanel implements VerifiedInputEditor {
         addListener(txtUsername);
         addListener(txtPassword);
         cmbServerList.addActionListener(e -> handleValueChange());
-        loginAsAdmin.setSelected(false);
+        //loginAsAdmin.setSelected(false);
     }
 
     private void initUi() {
@@ -93,8 +93,8 @@ public class UserLoginPanel extends JPanel implements VerifiedInputEditor {
         rowIndex++;
         holderPanel.add(new JSeparator(), new GridBagConstraints(0, rowIndex, 2, 1, 1.0, 0.0, GridBagConstraints.CENTER, GridBagConstraints.HORIZONTAL, new Insets(5, 2, 5, 2), 0, 0));
         rowIndex++;
-        holderPanel.add(loginAsAdmin, new GridBagConstraints(0, rowIndex, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.HORIZONTAL, new Insets(3, 2, 2, 2), 0, 0));
-        rowIndex++;
+        //holderPanel.add(loginAsAdmin, new GridBagConstraints(0, rowIndex, 1, 1, 0.0, 0.0, GridBagConstraints.BASELINE_TRAILING, GridBagConstraints.HORIZONTAL, new Insets(3, 2, 2, 2), 0, 0));
+        //rowIndex++;
 
         errorArea.setBackground(null);
         errorArea.setBorder(null);
@@ -200,9 +200,9 @@ public class UserLoginPanel extends JPanel implements VerifiedInputEditor {
         String serverAddress = (String)cmbServerList.getSelectedItem();
         String username = txtUsername.getText();
         String password = new String(txtPassword.getPassword());
-        boolean admin = this.loginAsAdmin.isSelected();
+        //boolean admin = this.loginAsAdmin.isSelected();
         
-        LocalHttpClient client = new LocalHttpClient(username, password, serverAddress, admin);
+        LocalHttpClient client = new LocalHttpClient(username, password, serverAddress);
         clientSession.setActiveClient(client);
         clientSession.addListener(client);
 

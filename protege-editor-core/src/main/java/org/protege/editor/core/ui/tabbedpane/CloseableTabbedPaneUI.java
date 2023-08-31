@@ -394,7 +394,7 @@ public class CloseableTabbedPaneUI extends BasicTabbedPaneUI {
 
         if (isBottomRun(selectedIndex)) {
             g.setColor(SEL_TAB_BOTTOM_COLOR);
-            Rectangle r = getTabBounds(tabPane, selectedIndex);
+            Rectangle r = getTabBounds(tabPane, selectedIndex);	
             g.drawLine(r.x, y, r.x + r.width - 1, y);
         }
     }

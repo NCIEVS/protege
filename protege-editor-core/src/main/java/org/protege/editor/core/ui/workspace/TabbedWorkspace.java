@@ -32,7 +32,7 @@ public abstract class TabbedWorkspace extends Workspace {
 
     private final Logger logger = LoggerFactory.getLogger(TabbedWorkspace.class);
 
-    private final JTabbedPane tabbedPane = new JTabbedPane();
+    public final JTabbedPane tabbedPane = new JTabbedPane();
 
     private final List<WorkspaceTab> workspaceTabs = new ArrayList<>();
     
