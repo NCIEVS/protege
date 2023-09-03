@@ -471,9 +471,11 @@ public class OWLOntologyAnnotationViewComponent extends AbstractOWLViewComponent
 
 
     private void handleOntologyChanges(List<? extends OWLOntologyChange> changes) {
-        for (OWLOntologyChange change : changes) {
-        	//Fix issue #574 - versionIRI in client-server mode
-            buttonAlter();
+    	//Fix issue #574 - versionIRI in client-server mode
+    	if (changes.size() > 0) {
+    		commitBtn.setEnabled(true);
+        }
+    	for (OWLOntologyChange change : changes) {
         	change.accept(new OWLOntologyChangeVisitor() {
                 @Override
                 public void visit(SetOntologyID change) {
