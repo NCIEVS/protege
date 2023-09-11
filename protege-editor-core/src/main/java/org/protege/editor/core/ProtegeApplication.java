@@ -399,7 +399,7 @@ public class ProtegeApplication {
         else {
             createAndSetupDefaultEditorKit();
         }
-        checkForUpdates();
+        //checkForUpdates();
     }
 
     private void checkForUpdates() {

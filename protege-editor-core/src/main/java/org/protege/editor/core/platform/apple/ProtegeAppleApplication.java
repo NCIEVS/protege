@@ -59,10 +59,12 @@ public class ProtegeAppleApplication extends AbstractAppleApplicationWrapper {
 
 
     protected boolean handlePreferencesRequest() {
+    	/**
         if (eKit != null){
             PreferencesDialogPanel.showPreferencesDialog(null, eKit);
             return true;
         }
+        **/
         return false;
     }
 

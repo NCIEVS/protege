@@ -38,7 +38,7 @@
       	<class value="org.protege.editor.owl.client.action.LogoutAction"/>
 	</extension>
 	
-	
+	<!--
 	<extension id="client.PauseServer"
                name="Pause Server"
                point="org.protege.editor.core.application.EditorKitMenuAction">
@@ -47,7 +47,8 @@
       	<editorKitId value="OWLEditorKit"/>
       	<class value="org.protege.editor.owl.client.action.PauseServerAction"/>
       	<checkbox value="true"/>
-	</extension>		
+	</extension>
+	-->		
 
 	<!-- Editor Hook -->
 

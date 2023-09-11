@@ -15,10 +15,11 @@
    <!--
    <extension-point id="ToolBarAction" name="ToolBarAction"
                     schema="schema/ToolBarAction.exsd"/>
-   -->
+   
    <extension-point id="preferencespanel" 
                     name="preferencespanel"
                     schema="schema/preferencespanel.exsd"/>
+                    -->
    
    <extension-point id="EditorKitHook"
                      name="EditorKit Hook"
@@ -100,6 +101,7 @@
 
 
 
+<!--
     <extension id="menu.plugins" point="org.protege.editor.core.application.EditorKitMenuAction">
         <name value="Check for plugins..."/>
         <toolTip value="Search for plugin downloads and updates"/>
@@ -107,15 +109,18 @@
         <path value="org.protege.editor.core.application.menu.FileMenu/SlotP-A"/>
         <editorKitId value="any"/>
     </extension>
+    -->
     
      <!-- Autoupdate preferences -->
 
+    <!--
 
     <extension id="ui.preferences.update"
                point="org.protege.editor.core.application.preferencespanel">
         <label value="Plugins"/>
         <class value="org.protege.editor.core.update.PluginPreferencesPanel"/>
     </extension>
+    -->
 
     
     <!-- Other startup actions --> 

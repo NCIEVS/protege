@@ -23,7 +23,7 @@ public class ShowPreferencesAction extends ProtegeAction {
 
 
     public void actionPerformed(ActionEvent e) {
-        PreferencesDialogPanel.showPreferencesDialog(null, getEditorKit());
+        //PreferencesDialogPanel.showPreferencesDialog(null, getEditorKit());
     }
 
 
