@@ -46,6 +46,8 @@ public class UIHelper {
         extensions.add("ttl");
         extensions.add("turtle");
         extensions.add("pom");
+        extensions.add("json");
+        
         OWL_EXTENSIONS = Collections.unmodifiableSet(extensions);
     }
 
