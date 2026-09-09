@@ -10,6 +10,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -46,6 +47,10 @@ import org.semanticweb.owlapi.model.OWLLiteral;
 import org.semanticweb.owlapi.model.OWLObjectSomeValuesFrom;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLSubClassOfAxiom;
+
+import gov.nih.nci.owlvirtuoso.ChangesetRdf;
+import gov.nih.nci.owlvirtuoso.RdfChangeSet;
+import gov.nih.nci.owlvirtuoso.SparqlStore;
 
 import com.google.common.collect.Lists;
 
@@ -397,9 +402,8 @@ public class HTTPChangeService extends BaseRoutingHandler {
 			ObjectOutputStream oos = new ObjectOutputStream(os);
 			oos.writeObject(hist);
 			if (this.update_triple_store) {
-				changeProcessor = new ConvertToRdf();
 				Project p = serverLayer.getConfiguration().getProject(projectId);
-				writeTripleStore(bundle, p);
+				writeTripleStore(bundle, p, hist.getHeadRevision());
 			}
 		} catch (AuthorizationException e) {
 			throw new ServerException(StatusCodes.UNAUTHORIZED, "Access denied", e);
@@ -413,22 +417,22 @@ public class HTTPChangeService extends BaseRoutingHandler {
 		}
 	}
 
-	private void writeTripleStore(CommitBundle bundle, Project p) {
-
-		graphName = "<" + p.namespace() + "/" + p.getName().get() + ">";
-		updateEndpoint = p.namespace() + "/" + p.getName().get();
-		ncit = "<" + p.namespace() + "#>";
-		prefix = "prefix ncit:" + ncit + " ";
-
-		repo = new SPARQLRepository(triple_store_url);
-
-		repo.initialize();
-		for (Commit c : bundle.getCommits()) {
-			for (OWLOntologyChange oc : c.getChanges()) {
-
-				changeProcessor.updateRdf(oc);
-
+	// Non-lossy replacement for the old ConvertToRdf path: transform the whole bundle's changes to
+	// RDF and apply them to Virtuoso as one revision-stamped SPARQL Update. Endpoint from the
+	// triple_store_url config; graph derived from the project namespace/name.
+	private void writeTripleStore(CommitBundle bundle, Project p, DocumentRevision head) {
+		String graph = p.namespace() + "/" + p.getName().get();
+		SPARQLRepository repository = new SPARQLRepository(triple_store_url);
+		repository.initialize();
+		try {
+			List<OWLOntologyChange> changes = new ArrayList<>();
+			for (Commit c : bundle.getCommits()) {
+				changes.addAll(c.getChanges());
 			}
+			RdfChangeSet rdf = ChangesetRdf.transform(changes);
+			new SparqlStore(repository, graph).apply(rdf, head.getRevisionNumber());
+		} finally {
+			repository.shutDown();
 		}
 	}
 
