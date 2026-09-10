@@ -14,14 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import org.eclipse.rdf4j.model.Resource;
-import org.eclipse.rdf4j.model.Statement;
-import org.eclipse.rdf4j.model.impl.SimpleValueFactory;
-import org.eclipse.rdf4j.query.GraphQuery;
-import org.eclipse.rdf4j.query.GraphQueryResult;
-import org.eclipse.rdf4j.query.Query;
-import org.eclipse.rdf4j.query.QueryLanguage;
-import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
 import org.protege.editor.owl.server.api.ChangeService;
 import org.protege.editor.owl.server.api.CommitBundle;
@@ -39,14 +31,7 @@ import org.protege.editor.owl.server.versioning.Commit;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
 import org.protege.editor.owl.server.versioning.api.DocumentRevision;
 import org.protege.editor.owl.server.versioning.api.HistoryFile;
-import org.semanticweb.owlapi.model.OWLAnnotation;
-import org.semanticweb.owlapi.model.OWLAnnotationAssertionAxiom;
-import org.semanticweb.owlapi.model.OWLAxiomVisitor;
-import org.semanticweb.owlapi.model.OWLDeclarationAxiom;
-import org.semanticweb.owlapi.model.OWLLiteral;
-import org.semanticweb.owlapi.model.OWLObjectSomeValuesFrom;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
-import org.semanticweb.owlapi.model.OWLSubClassOfAxiom;
 
 import gov.nih.nci.owlvirtuoso.ChangesetRdf;
 import gov.nih.nci.owlvirtuoso.RdfChangeSet;
@@ -74,196 +59,8 @@ public class HTTPChangeService extends BaseRoutingHandler {
 
 	private boolean update_triple_store = false;
 	private String triple_store_url = "http://localhost:8890/sparql/";
-	private String graphName = null;
-	private String updateEndpoint = null;
-	private String ncit = null;
-	SPARQLRepository repo = null;
-
-	private String prefix = null;
-
-	private String subClassOf = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
-	private String type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-	private String owlclass = "http://www.w3.org/2002/07/owl#Class";
 	
 	
-	private String buildAnonParentQuery(OWLSubClassOfAxiom ax, boolean add) {
-		if (ax.getSuperClass() instanceof OWLObjectSomeValuesFrom) {
-			SimpleValueFactory factory = SimpleValueFactory.getInstance();
-
-			String source = ax.getSubClass().asOWLClass().getIRI().getShortForm();
-			Resource sub = factory.createIRI(ax.getSubClass().asOWLClass().getIRI().getIRIString());
-			org.eclipse.rdf4j.model.IRI pred = factory.createIRI(subClassOf);
-
-			OWLObjectSomeValuesFrom osvf = (OWLObjectSomeValuesFrom) ax.getSuperClass();
-			String objStr = osvf.getProperty().asOWLObjectProperty().getIRI().getShortForm();
-			String fillerStr = osvf.getFiller().asOWLClass().getIRI().getShortForm();
-
-			String base = prefix;
-			if (add) {
-				base += "insert { graph " + graphName + " { ";
-				base += "ncit:" + source + " rdfs:subClassOf _:foo .";
-				base += " _:foo rdf:type owl:Restriction ; ";
-				base += " owl:onProperty ncit:" + objStr + " ; ";
-				base += " owl:someValuesFrom ncit:" + fillerStr + " . ";
-
-				return base += " } } WHERE {}";
-
-			} else {
-				base += "delete { graph " + graphName + " { ";
-				base += "?o ?q ?r . ";
-				base += " ncit:" + source + " rdfs:subClassOf ?o } } where { ";
-
-				base += " ncit:" + source + " rdfs:subClassOf ?o . ";
-				base += " ?o rdf:type owl:Restriction ; ";
-				base += " owl:onProperty ncit:" + objStr + " ; ";
-				base += " owl:someValuesFrom ncit:" + fillerStr + " . ";
-				return base + " ?o ?q ?r }";
-
-			}
-		}
-		return "";
-
-	}
-
-	private String buildCompQuery(OWLAnnotationAssertionAxiom ax, boolean add) {
-		SimpleValueFactory factory = SimpleValueFactory.getInstance();
-
-		String source = ax.getSubject().asIRI().get().getShortForm();
-		String prop = ax.getProperty().asOWLAnnotationProperty().getIRI().getShortForm();
-		OWLLiteral val = ax.getValue().asLiteral().get();
-		String valstr = factory.createLiteral(val.getLiteral()).stringValue();
-
-		String base = prefix;
-		if (add) {
-			base += "insert { graph " + graphName + " { ";
-		} else {
-			base += "delete { graph " + graphName + " { ";
-
-		}
-
-		// In both cases all main assertion
-
-		base += "ncit:" + source + " ncit:" + prop + " " + "\"" + valstr + "\" . ";
-
-		if (ax.getAnnotations().isEmpty()) {
-			return base += " } } WHERE {}";
-		} else {
-			if (add) {
-				base += "[] rdf:type owl:Axiom ; ";
-				base += "owl:annotatedSource ncit:" + source + " ; ";
-				base += "owl:annotatedProperty ncit:" + prop + " ; ";
-				base += "owl:annotatedTarget " + "\"" + valstr + "\" ";
-
-				for (OWLAnnotation an : ax.getAnnotations()) {
-					base += " ; ";
-					String anProp = an.getProperty().getIRI().getShortForm();
-					OWLLiteral anVal = an.getValue().asLiteral().get();
-					String anValStr = factory.createLiteral(anVal.getLiteral()).stringValue();
-					base += "ncit:" + anProp + " \"" + anValStr + "\"";
-
-				}
-
-				return base + " } } WHERE {}";
-			} else {
-				base += "?s ?p ?o  } } WHERE { ";
-				base += "?s owl:annotatedSource ncit:" + source + " ; ";
-				base += "owl:annotatedProperty ncit:" + prop + " ; ";
-				base += "owl:annotatedTarget " + "\"" + valstr + "\" ";
-
-				for (OWLAnnotation an : ax.getAnnotations()) {
-					base += " ; ";
-					String anProp = an.getProperty().getIRI().getShortForm();
-					OWLLiteral anVal = an.getValue().asLiteral().get();
-					String anValStr = factory.createLiteral(anVal.getLiteral()).stringValue();
-					base += "ncit:" + anProp + " \"" + anValStr + "\"";
-
-				}
-				base += " . ";
-
-				return base + " ?s ?p ?o }";
-
-			}
-
-		}
-
-	}
-
-	private class ConvertToRdf implements OWLAxiomVisitor {
-
-		private boolean add = true;
-
-		public void updateRdf(OWLOntologyChange oc) {
-			add = oc.isAddAxiom();
-			oc.getAxiom().accept(this);
-
-		}
-
-		public void visit(OWLDeclarationAxiom axiom) {
-			SimpleValueFactory factory = SimpleValueFactory.getInstance();
-
-			Resource sub = factory.createIRI(axiom.getEntity().getIRI().getIRIString());
-			org.eclipse.rdf4j.model.IRI pred = factory.createIRI(type);
-			org.eclipse.rdf4j.model.IRI val = factory.createIRI(owlclass);
-			
-			Statement st = factory.createStatement(sub, pred, val, null);
-			Resource context = factory.createIRI(updateEndpoint);
-			RepositoryConnection conn = repo.getConnection();
-
-			if (add) {
-				conn.add(st, context);
-			} else {
-				conn.remove(st, context);
-			}
-
-			conn.close();
-
-		}
-
-		public void visit(OWLAnnotationAssertionAxiom ax) {
-
-			String q = buildCompQuery(ax, add);
-
-			Query query = repo.getConnection().prepareQuery(QueryLanguage.SPARQL, q);
-
-			if (query instanceof GraphQuery) {
-				GraphQueryResult res = ((GraphQuery) query).evaluate();
-			}
-		}
-
-		public void visit(OWLSubClassOfAxiom ax) {
-			if (ax.getSuperClass().isOWLClass()) {
-				SimpleValueFactory factory = SimpleValueFactory.getInstance();
-				
-				Resource sub = factory.createIRI(ax.getSubClass().asOWLClass().getIRI().getIRIString());
-				org.eclipse.rdf4j.model.IRI pred = factory.createIRI(subClassOf);
-				Resource sup = factory.createIRI(ax.getSuperClass().asOWLClass().getIRI().getIRIString());
-
-				Statement st = factory.createStatement(sub, pred, sup, null);
-				Resource context = factory.createIRI(updateEndpoint);
-				RepositoryConnection conn = repo.getConnection();
-
-				if (add) {
-					conn.add(st, context);
-				} else {
-					conn.remove(st, context);
-				}
-
-				conn.close();
-
-			} else {
-				String q = buildAnonParentQuery(ax, add);
-
-				Query query = repo.getConnection().prepareQuery(QueryLanguage.SPARQL, q);
-
-				if (query instanceof GraphQuery) {
-					GraphQueryResult res = ((GraphQuery) query).evaluate();
-				}
-				
-			}
-		}
-	}
-
-	private ConvertToRdf changeProcessor = null;
 
 	static enum PauseAllowed {
 		OK, NOT_WORKFLOW_MANAGER, NOT_PAUSING_USER, SERVER_PAUSED;
