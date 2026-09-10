@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.protege.editor.owl.server.api.ChangeService;
 import org.protege.editor.owl.server.api.CommitBundle;
 import org.protege.editor.owl.server.api.ServerLayer;
@@ -34,7 +36,6 @@ import org.protege.editor.owl.server.versioning.api.HistoryFile;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 
 import gov.nih.nci.owlvirtuoso.ChangesetRdf;
-import gov.nih.nci.owlvirtuoso.RdfChangeSet;
 import gov.nih.nci.owlvirtuoso.SparqlStore;
 
 import com.google.common.collect.Lists;
@@ -49,6 +50,8 @@ import io.undertow.server.HttpServerExchange;
 import io.undertow.util.StatusCodes;
 
 public class HTTPChangeService extends BaseRoutingHandler {
+
+	private static final Logger logger = LoggerFactory.getLogger(HTTPChangeService.class);
 
 	private final ServerLayer serverLayer;
 	private ChangeService changeService;
@@ -200,7 +203,7 @@ public class HTTPChangeService extends BaseRoutingHandler {
 			oos.writeObject(hist);
 			if (this.update_triple_store) {
 				Project p = serverLayer.getConfiguration().getProject(projectId);
-				writeTripleStore(bundle, p, hist.getHeadRevision());
+				writeTripleStore(p, hist.getHeadRevision());
 			}
 		} catch (AuthorizationException e) {
 			throw new ServerException(StatusCodes.UNAUTHORIZED, "Access denied", e);
@@ -214,20 +217,32 @@ public class HTTPChangeService extends BaseRoutingHandler {
 		}
 	}
 
-	// Non-lossy replacement for the old ConvertToRdf path: transform the whole bundle's changes to
-	// RDF and apply them to Virtuoso as one revision-stamped SPARQL Update. Endpoint from the
-	// triple_store_url config; graph derived from the project namespace/name.
-	private void writeTripleStore(CommitBundle bundle, Project p, DocumentRevision head) {
+	// Non-lossy, self-healing replacement for the old ConvertToRdf path. Rather than applying only
+	// this bundle, sync Virtuoso from its last-applied-revision marker up to the new head: on a normal
+	// commit that is just the new changes, but after a restart/outage it also replays any gap.
+	// getChanges is exclusive of `from`, so from=marker yields exactly marker+1..head. Endpoint from
+	// triple_store_url config; graph from project namespace/name. A triple-store failure is logged but
+	// never fails the commit — the changeset log is authoritative and the next commit replays.
+	private void writeTripleStore(Project p, DocumentRevision head) {
 		String graph = p.namespace() + "/" + p.getName().get();
 		SPARQLRepository repository = new SPARQLRepository(triple_store_url);
 		repository.initialize();
 		try {
+			SparqlStore store = new SparqlStore(repository, graph);
+			long marker = store.lastAppliedRevision();
+			DocumentRevision from = (marker < 0)
+					? DocumentRevision.START_REVISION
+					: DocumentRevision.create((int) marker);
+			HistoryFile file = HistoryFile.openExisting(serverLayer.getHistoryFilePath(p.getId()));
+			ChangeHistory history = changeService.getChanges(file, from, head);
 			List<OWLOntologyChange> changes = new ArrayList<>();
-			for (Commit c : bundle.getCommits()) {
-				changes.addAll(c.getChanges());
+			for (List<OWLOntologyChange> revisionChanges : history.getRevisions().values()) {
+				changes.addAll(revisionChanges);
 			}
-			RdfChangeSet rdf = ChangesetRdf.transform(changes);
-			new SparqlStore(repository, graph).apply(rdf, head.getRevisionNumber());
+			store.apply(ChangesetRdf.transform(changes), head.getRevisionNumber());
+		} catch (Exception e) {
+			logger.error("Triple store update failed for " + p.getId()
+					+ "; the changeset log is authoritative and the next commit will replay from the marker", e);
 		} finally {
 			repository.shutDown();
 		}
