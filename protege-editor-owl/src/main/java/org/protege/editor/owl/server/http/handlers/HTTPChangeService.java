@@ -29,7 +29,6 @@ import org.protege.editor.owl.server.http.ServerProperties;
 import org.protege.editor.owl.server.http.exception.ServerException;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
-import org.protege.editor.owl.server.versioning.Commit;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
 import org.protege.editor.owl.server.versioning.api.DocumentRevision;
 import org.protege.editor.owl.server.versioning.api.HistoryFile;
@@ -233,6 +232,16 @@ public class HTTPChangeService extends BaseRoutingHandler {
 			DocumentRevision from = (marker < 0)
 					? DocumentRevision.START_REVISION
 					: DocumentRevision.create((int) marker);
+			// A marker left on the graph by a previous ontology/project can be ahead of this
+			// history's head, which would make the replay range invalid (getChanges/crop throws
+			// "toKey out of range"). Treat such a marker as stale and resync the whole current
+			// history from the start.
+			if (from.aheadOf(head)) {
+				logger.warn("Triple store marker r{} is ahead of head r{} for graph {}; "
+						+ "treating it as stale and resyncing from the start", marker,
+						head.getRevisionNumber(), graph);
+				from = DocumentRevision.START_REVISION;
+			}
 			HistoryFile file = HistoryFile.openExisting(serverLayer.getHistoryFilePath(p.getId()));
 			ChangeHistory history = changeService.getChanges(file, from, head);
 			List<OWLOntologyChange> changes = new ArrayList<>();
