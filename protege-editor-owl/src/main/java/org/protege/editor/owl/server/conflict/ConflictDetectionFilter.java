@@ -62,6 +62,8 @@ public class ConflictDetectionFilter extends ServerFilterAdapter {
             HistoryFile historyFile = HistoryFile.openExisting(projectFilePath);
             DocumentRevision serverHeadRevision = changeService.getHeadRevision(historyFile);
             DocumentRevision commitBaseRevision = commitBundle.getBaseRevision();
+            logger.info("Commit gate: base r{} vs server head r{}",
+                    commitBaseRevision.getRevisionNumber(), serverHeadRevision.getRevisionNumber());
             if (isOutdated(commitBaseRevision, serverHeadRevision)) {
                 // The commit was built against an older head. Accept it anyway if it does not
                 // touch any entity that changed in the interval (commitBaseRevision, head] -- a
