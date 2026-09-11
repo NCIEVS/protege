@@ -92,20 +92,25 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         if (graph == null || graph.isEmpty()) {
             return Collections.emptySet();
         }
-        Set<OWLClass> cached = childrenCache.get(object);
-        if (cached != null) {
-            return cached;
+        Set<OWLClass> children = childrenCache.get(object);
+        if (children == null) {
+            if (object.equals(thing)) {
+                children = runClassQuery(thingChildrenQuery(), "c");
+                childrenCache.put(object, children);
+            } else {
+                children = fetchChildrenAndGrandchildren(object);
+            }
         }
-        if (object.equals(thing)) {
-            Set<OWLClass> roots = runClassQuery(thingChildrenQuery(), "c");
-            childrenCache.put(object, roots);
-            prefetchLabels(roots);
-            return roots;
-        }
-        return fetchChildrenAndGrandchildren(object);
+        // The returned children are about to be sorted (a render per child) and painted, so batch-
+        // prime their labels in one query. This fires for cache hits too: the tree computes a node's
+        // +box by loading and sorting that node's children, so priming the returned set here means a
+        // child's grandchildren are primed in one query right before they are sorted, instead of one
+        // SPARQL per grandchild. prefetch() skips already-cached IRIs, so repeat calls are cheap.
+        prefetchLabels(children);
+        return children;
     }
 
-    // Batch-prime the display labels of a node's children in one query, so the tree's sibling sort
+    // Batch-prime the display labels of a set of classes in one query, so the tree's sibling sort
     // (a render per child) and the per-row paint are cache hits instead of a SPARQL round trip each.
     private void prefetchLabels(Set<OWLClass> classes) {
         if (classes.isEmpty()) {
@@ -178,7 +183,6 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         for (OWLClass child : children) {
             childrenCache.putIfAbsent(child, grandchildren.getOrDefault(child, Collections.emptySet()));
         }
-        prefetchLabels(children);
         return children;
     }
 
