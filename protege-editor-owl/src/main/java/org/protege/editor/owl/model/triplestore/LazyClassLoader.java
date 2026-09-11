@@ -22,9 +22,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.util.ArrayDeque;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -52,12 +50,18 @@ public final class LazyClassLoader {
     private static final Logger logger = LoggerFactory.getLogger(LazyClassLoader.class);
 
     private static final String SKOLEM_PREFIX = "urn:skolem:";
-    // Virtuoso exposes blank nodes as nodeID:// IRIs, which (unlike a bare bnode label) can be
-    // queried; the BFS follows them and unifies them back to blank nodes for OWL parsing.
-    private static final String NODEID_PREFIX = "nodeID://";
     private static final String RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
     private static final String RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#";
     private static final String OWL_NS = "http://www.w3.org/2002/07/owl#";
+
+    // Structural predicates of anonymous OWL class expressions and RDF lists. A single-query closure
+    // follows these transitively (never a hierarchy/reference predicate) so it captures one entity's
+    // own anonymous structure -- restrictions, defined-class intersections, datatype enumerations --
+    // in a single result set (preserving blank-node identity) without dragging in named neighbours.
+    private static final String STRUCTURAL_PATH =
+            "(owl:intersectionOf|owl:unionOf|owl:complementOf|owl:oneOf|rdf:first|rdf:rest|"
+          + "owl:someValuesFrom|owl:allValuesFrom|owl:hasValue|owl:onProperty|owl:onClass|"
+          + "owl:onDataRange|owl:withRestrictions|owl:members|owl:distinctMembers)*";
 
     private static LazyClassLoader instance;
 
@@ -143,72 +147,40 @@ public final class LazyClassLoader {
         return axioms.size();
     }
 
-    /** BFS the anonymous (blank-node / skolem) closure reachable from the seed IRIs. */
+    /**
+     * An entity's own triples plus the blank-node/skolem closure of its anonymous expressions,
+     * fetched in a SINGLE query so blank-node identity is preserved (rdf4j relabels blank nodes per
+     * result, so a multi-query walk cannot re-address them). The structural path is followed only
+     * from a subClassOf/equivalentClass entry and only anonymous subjects are kept, so named
+     * neighbours (e.g. role fillers) are referenced but never expanded.
+     */
+    private Model closure(String iri) {
+        return store.construct(LazyTripleStore.PREFIXES
+                + "CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + store.graph() + "> { "
+                + "{ BIND(<" + iri + "> AS ?s) <" + iri + "> ?p ?o } UNION { "
+                + "<" + iri + "> (rdfs:subClassOf|owl:equivalentClass) ?entry . "
+                + "?entry " + STRUCTURAL_PATH + " ?s . "
+                + "FILTER(isBlank(?s) || STRSTARTS(STR(?s), \"" + SKOLEM_PREFIX + "\")) "
+                + "?s ?p ?o } } }");
+    }
+
     private Model fetchClosure(java.util.Collection<String> seeds) {
         Model total = new LinkedHashModel();
-        expand(new ArrayDeque<>(seeds), new HashSet<>(), total);
+        for (String seed : seeds) {
+            total.addAll(closure(seed));
+        }
         return total;
     }
 
     private Model fetchMolecule(String classIri) {
         Model total = new LinkedHashModel();
-        Deque<String> frontier = new ArrayDeque<>();
-
-        // Reified owl:Axiom nodes annotate the class via owl:annotatedSource (synonym qualifiers etc.).
-        Model inbound = store.construct(LazyTripleStore.PREFIXES
+        total.addAll(closure(classIri));
+        // Reified owl:Axiom nodes annotate the class via owl:annotatedSource (synonym/definition
+        // qualifiers); they point inbound to the class, so are fetched separately.
+        total.addAll(store.construct(LazyTripleStore.PREFIXES
                 + "CONSTRUCT { ?ax ?p ?o } WHERE { GRAPH <" + store.graph() + "> { "
-                + "?ax owl:annotatedSource <" + classIri + "> . ?ax ?p ?o } }");
-        total.addAll(inbound);
-        for (Value o : inbound.objects()) {
-            if (isExpandable(o)) {
-                frontier.add(describeKey(o));
-            }
-        }
-
-        frontier.add(classIri);
-        expand(frontier, new HashSet<>(), total);
+                + "?ax owl:annotatedSource <" + classIri + "> . ?ax ?p ?o } }"));
         return total;
-    }
-
-    private void expand(Deque<String> frontier, Set<String> described, Model total) {
-        while (!frontier.isEmpty()) {
-            String node = frontier.poll();
-            if (!described.add(node)) {
-                continue;
-            }
-            Model description = store.describe(node);
-            total.addAll(description);
-            for (Value o : description.objects()) {
-                if (isExpandable(o)) {
-                    String key = describeKey(o);
-                    if (!described.contains(key)) {
-                        frontier.add(key);
-                    }
-                }
-            }
-        }
-    }
-
-    // The queryable form of an anonymous node: a real bnode is addressed by its nodeID:// IRI;
-    // skolem/nodeID IRIs are already queryable as-is.
-    private String describeKey(Value value) {
-        if (value instanceof BNode) {
-            return NODEID_PREFIX + ((BNode) value).getID();
-        }
-        return value.stringValue();
-    }
-
-    // Only follow anonymous structure (real bnodes, Virtuoso nodeID:// IRIs, skolem IRIs); never a
-    // named neighbour, so the molecule stays scoped to one entity.
-    private boolean isExpandable(Value value) {
-        if (value instanceof BNode) {
-            return true;
-        }
-        if (value instanceof org.eclipse.rdf4j.model.IRI) {
-            String iri = value.stringValue();
-            return iri.startsWith(SKOLEM_PREFIX) || iri.startsWith(NODEID_PREFIX);
-        }
-        return false;
     }
 
     private Model deskolemise(Model molecule) {
@@ -222,18 +194,12 @@ public final class LazyClassLoader {
         return out;
     }
 
-    // Normalise anonymous nodes to blank nodes so OWL's RDF mapping recognises anonymous class
-    // expressions/lists: a nodeID:// IRI becomes the bnode with the same label (unifying with the
-    // referencing triple's bnode); a skolem IRI becomes a stable fresh bnode; real bnodes are kept.
+    // Graphs written by our commit path skolemise blank nodes to urn:skolem: IRIs; turn those back
+    // into blank nodes so OWL's RDF mapping recognises the anonymous expressions. (Graphs loaded
+    // directly from an OWL file already use blank nodes, which pass through unchanged.)
     private Value mapValue(Value value, Map<String, BNode> bnodes) {
-        if (value instanceof org.eclipse.rdf4j.model.IRI) {
-            String iri = value.stringValue();
-            if (iri.startsWith(SKOLEM_PREFIX)) {
-                return bnodes.computeIfAbsent(iri, k -> vf.createBNode());
-            }
-            if (iri.startsWith(NODEID_PREFIX)) {
-                return vf.createBNode(iri.substring(NODEID_PREFIX.length()));
-            }
+        if (value instanceof org.eclipse.rdf4j.model.IRI && value.stringValue().startsWith(SKOLEM_PREFIX)) {
+            return bnodes.computeIfAbsent(value.stringValue(), k -> vf.createBNode());
         }
         return value;
     }
