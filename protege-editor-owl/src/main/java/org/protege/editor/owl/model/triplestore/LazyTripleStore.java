@@ -15,7 +15,9 @@ import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -102,6 +104,33 @@ public final class LazyTripleStore {
             logger.error("SELECT failed (returning empty): {}", query, e);
         }
         return Optional.empty();
+    }
+
+    /** Maps each keyVar value to the first non-null value among valVars (first row wins per key). */
+    public Map<String, String> selectMap(String query, String keyVar, String... valVars) {
+        Map<String, String> result = new HashMap<>();
+        try (RepositoryConnection conn = repository.getConnection()) {
+            TupleQuery tupleQuery = conn.prepareTupleQuery(QueryLanguage.SPARQL, query);
+            try (TupleQueryResult rows = tupleQuery.evaluate()) {
+                while (rows.hasNext()) {
+                    BindingSet row = rows.next();
+                    Value key = row.getValue(keyVar);
+                    if (key == null) {
+                        continue;
+                    }
+                    for (String var : valVars) {
+                        Value v = row.getValue(var);
+                        if (v != null) {
+                            result.putIfAbsent(key.stringValue(), v.stringValue());
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("SELECT failed (returning empty): {}", query, e);
+        }
+        return result;
     }
 
     public boolean ask(String query) {

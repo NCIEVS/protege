@@ -8,6 +8,7 @@ import org.eclipse.rdf4j.query.TupleQuery;
 import org.eclipse.rdf4j.query.TupleQueryResult;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
+import org.protege.editor.owl.model.triplestore.LazyLabelCache;
 import org.semanticweb.owlapi.model.IRI;
 import org.semanticweb.owlapi.model.OWLClass;
 import org.semanticweb.owlapi.model.OWLDataFactory;
@@ -16,9 +17,11 @@ import org.semanticweb.owlapi.model.OWLOntologyManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -96,9 +99,23 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         if (object.equals(thing)) {
             Set<OWLClass> roots = runClassQuery(thingChildrenQuery(), "c");
             childrenCache.put(object, roots);
+            prefetchLabels(roots);
             return roots;
         }
         return fetchChildrenAndGrandchildren(object);
+    }
+
+    // Batch-prime the display labels of a node's children in one query, so the tree's sibling sort
+    // (a render per child) and the per-row paint are cache hits instead of a SPARQL round trip each.
+    private void prefetchLabels(Set<OWLClass> classes) {
+        if (classes.isEmpty()) {
+            return;
+        }
+        List<IRI> iris = new ArrayList<>(classes.size());
+        for (OWLClass c : classes) {
+            iris.add(c.getIRI());
+        }
+        LazyLabelCache.getInstance().prefetch(iris);
     }
 
     private String thingChildrenQuery() {
@@ -161,6 +178,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         for (OWLClass child : children) {
             childrenCache.putIfAbsent(child, grandchildren.getOrDefault(child, Collections.emptySet()));
         }
+        prefetchLabels(children);
         return children;
     }
 
