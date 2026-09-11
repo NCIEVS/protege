@@ -52,6 +52,9 @@ public final class LazyClassLoader {
     private static final Logger logger = LoggerFactory.getLogger(LazyClassLoader.class);
 
     private static final String SKOLEM_PREFIX = "urn:skolem:";
+    private static final String RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+    private static final String RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#";
+    private static final String OWL_NS = "http://www.w3.org/2002/07/owl#";
 
     private static LazyClassLoader instance;
 
@@ -118,7 +121,9 @@ public final class LazyClassLoader {
         if (molecule.isEmpty()) {
             return 0;
         }
-        byte[] rdfxml = toRdfXml(deskolemise(molecule));
+        Model prepared = deskolemise(molecule);
+        declareAnnotationProperties(prepared);
+        byte[] rdfxml = toRdfXml(prepared);
         OWLOntology reconstructed = OwlRdfIO.load(new ByteArrayInputStream(rdfxml));
         Set<OWLAxiom> axioms = new HashSet<>();
         reconstructed.axioms().forEach(axioms::add);
@@ -213,6 +218,24 @@ public final class LazyClassLoader {
             return bnodes.computeIfAbsent(value.stringValue(), k -> vf.createBNode());
         }
         return value;
+    }
+
+    // owlapi parses each molecule in isolation, so a non-builtin predicate (an NCI P-property) must
+    // be declared an annotation property here or owlapi cannot fold owl:Axiom reifications onto
+    // their base assertion -- which would drop synonym/definition qualifiers and duplicate values.
+    private void declareAnnotationProperties(Model model) {
+        Set<org.eclipse.rdf4j.model.IRI> predicates = new HashSet<>();
+        for (Statement st : model) {
+            predicates.add(st.getPredicate());
+        }
+        org.eclipse.rdf4j.model.IRI rdfType = vf.createIRI(RDF_NS + "type");
+        org.eclipse.rdf4j.model.IRI annotationProperty = vf.createIRI(OWL_NS + "AnnotationProperty");
+        for (org.eclipse.rdf4j.model.IRI predicate : predicates) {
+            String iri = predicate.stringValue();
+            if (!iri.startsWith(RDF_NS) && !iri.startsWith(RDFS_NS) && !iri.startsWith(OWL_NS)) {
+                model.add(predicate, rdfType, annotationProperty);
+            }
+        }
     }
 
     private byte[] toRdfXml(Model model) {
