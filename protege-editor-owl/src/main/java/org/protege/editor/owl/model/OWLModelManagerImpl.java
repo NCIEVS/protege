@@ -837,13 +837,19 @@ public class OWLModelManagerImpl extends AbstractModelManager implements OWLMode
 
     public OWLModelManagerEntityRenderer getOWLEntityRenderer() {
         if (entityRenderer == null) {
-            try {
-                OWLRendererPreferences preferences = OWLRendererPreferences.getInstance();
-                RendererPlugin plugin = preferences.getRendererPlugin();
-                entityRenderer = plugin.newInstance();
+            if (Boolean.getBoolean("nci.lazyHierarchy")) {
+                entityRenderer = new org.protege.editor.owl.ui.renderer.VirtuosoEntityRenderer();
                 loadRenderer();
-            } catch (ClassNotFoundException | InstantiationException | IllegalAccessException e) {
-                logger.error(e.getMessage());
+            }
+            if (entityRenderer == null) {
+                try {
+                    OWLRendererPreferences preferences = OWLRendererPreferences.getInstance();
+                    RendererPlugin plugin = preferences.getRendererPlugin();
+                    entityRenderer = plugin.newInstance();
+                    loadRenderer();
+                } catch (ClassNotFoundException | InstantiationException | IllegalAccessException e) {
+                    logger.error(e.getMessage());
+                }
             }
             if (entityRenderer == null) {
                 entityRenderer = new OWLEntityRendererImpl();
