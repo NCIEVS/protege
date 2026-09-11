@@ -65,6 +65,7 @@ public final class LazyClassLoader {
     private final LazyTripleStore store = new LazyTripleStore();
     private final ValueFactory vf = SimpleValueFactory.getInstance();
     private final Set<String> loaded = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    private volatile boolean schemaLoaded = false;
 
     private boolean isActive() {
         return store.isConfigured();
@@ -80,30 +81,79 @@ public final class LazyClassLoader {
             return;
         }
         try {
-            Model molecule = fetchMolecule(classIri);
-            if (molecule.isEmpty()) {
-                loaded.add(classIri);
-                return;
-            }
-            byte[] rdfxml = toRdfXml(deskolemise(molecule));
-            OWLOntology reconstructed = OwlRdfIO.load(new ByteArrayInputStream(rdfxml));
-            Set<OWLAxiom> axioms = new HashSet<>();
-            reconstructed.axioms().forEach(axioms::add);
-
-            OWLModelManager modelManager = editorKit.getOWLModelManager();
-            OWLOntology target = modelManager.getActiveOntology();
-            SessionRecorder recorder = SessionRecorder.getInstance(editorKit);
-            recorder.stopRecording();
-            try {
-                modelManager.getOWLOntologyManager().addAxioms(target, axioms.stream());
-            } finally {
-                recorder.startRecording();
-            }
+            int count = materialise(fetchMolecule(classIri), editorKit);
             loaded.add(classIri);
-            logger.info("Lazily loaded {} axioms for {}", axioms.size(), classIri);
+            logger.info("Lazily loaded {} axioms for {}", count, classIri);
         } catch (Exception e) {
             logger.error("Failed to lazily load class {}", classIri, e);
         }
+    }
+
+    /**
+     * Eagerly materialise the ontology schema -- annotation/object/data properties and datatypes
+     * with their definitions -- into the active ontology. The schema is small and always resident
+     * in the lazy model (only class data is fetched on demand), so config-driven lookups (complex
+     * properties, code/pref-name props, role properties, datatype enumerations) resolve against the
+     * ontology signature. Runs once.
+     */
+    public synchronized void ensureSchemaLoaded(OWLEditorKit editorKit) {
+        if (!isActive() || schemaLoaded) {
+            return;
+        }
+        try {
+            Set<String> seeds = store.selectValues(LazyTripleStore.PREFIXES
+                    + "SELECT DISTINCT ?s WHERE { GRAPH <" + store.graph() + "> { ?s a ?t . "
+                    + "FILTER(?t IN (owl:AnnotationProperty, owl:ObjectProperty, "
+                    + "owl:DatatypeProperty, rdfs:Datatype)) } }", "s");
+            int count = materialise(fetchClosure(seeds), editorKit);
+            schemaLoaded = true;
+            logger.info("Lazily loaded schema: {} axioms from {} entities", count, seeds.size());
+        } catch (Exception e) {
+            logger.error("Failed to lazily load schema", e);
+        }
+    }
+
+    /** De-skolemise, parse RDF->OWL and add to the active ontology (recording paused). */
+    private int materialise(Model molecule, OWLEditorKit editorKit) throws Exception {
+        if (molecule.isEmpty()) {
+            return 0;
+        }
+        byte[] rdfxml = toRdfXml(deskolemise(molecule));
+        OWLOntology reconstructed = OwlRdfIO.load(new ByteArrayInputStream(rdfxml));
+        Set<OWLAxiom> axioms = new HashSet<>();
+        reconstructed.axioms().forEach(axioms::add);
+
+        OWLModelManager modelManager = editorKit.getOWLModelManager();
+        OWLOntology target = modelManager.getActiveOntology();
+        SessionRecorder recorder = SessionRecorder.getInstance(editorKit);
+        recorder.stopRecording();
+        try {
+            modelManager.getOWLOntologyManager().addAxioms(target, axioms.stream());
+        } finally {
+            recorder.startRecording();
+        }
+        return axioms.size();
+    }
+
+    /** BFS the skolem/blank-node closure reachable from the seed IRIs. */
+    private Model fetchClosure(java.util.Collection<String> seeds) {
+        Model total = new LinkedHashModel();
+        Deque<String> frontier = new ArrayDeque<>(seeds);
+        Set<String> described = new HashSet<>();
+        while (!frontier.isEmpty()) {
+            String node = frontier.poll();
+            if (!described.add(node)) {
+                continue;
+            }
+            Model description = store.describe(node);
+            total.addAll(description);
+            for (Value o : description.objects()) {
+                if (isExpandable(o) && !described.contains(o.stringValue())) {
+                    frontier.add(o.stringValue());
+                }
+            }
+        }
+        return total;
     }
 
     private Model fetchMolecule(String classIri) {
