@@ -55,6 +55,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // Read-only browsing cache. No feed-driven invalidation yet (slice 1); clearCaches() is the hook.
     private final Map<OWLClass, Set<OWLClass>> childrenCache = new ConcurrentHashMap<>();
     private final Map<OWLClass, Set<OWLClass>> parentsCache = new ConcurrentHashMap<>();
+    private final Map<OWLClass, Set<OWLClass>> equivalentsCache = new ConcurrentHashMap<>();
 
     public VirtuosoClassHierarchyProvider(OWLOntologyManager manager, String endpointUrl, String graphIri) {
         super(manager);
@@ -80,6 +81,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     public void clearCaches() {
         childrenCache.clear();
         parentsCache.clear();
+        equivalentsCache.clear();
     }
 
     @Override
@@ -216,6 +218,12 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         if (graph == null || graph.isEmpty()) {
             return Collections.emptySet();
         }
+        // Cached: the tree cell renderer asks for equivalents on every cell paint, so an uncached
+        // query here fired a SPARQL per row per repaint (a query storm while scrolling).
+        return equivalentsCache.computeIfAbsent(object, this::queryEquivalents);
+    }
+
+    private Set<OWLClass> queryEquivalents(OWLClass object) {
         final String c = object.getIRI().toString();
         final String query = PREFIXES
               + "SELECT DISTINCT ?e WHERE { GRAPH <" + graph + "> { "
