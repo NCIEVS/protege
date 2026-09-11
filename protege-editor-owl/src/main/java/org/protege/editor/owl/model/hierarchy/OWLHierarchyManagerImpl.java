@@ -58,7 +58,14 @@ public class OWLHierarchyManagerImpl implements OWLHierarchyManager {
 
     public OWLObjectHierarchyProvider<OWLClass> getOWLClassHierarchyProvider() {
         if (assertedClassHierarchyProvider == null) {
-            assertedClassHierarchyProvider = new AssertedClassHierarchyProvider(mngr.getOWLOntologyManager());
+            if (Boolean.getBoolean("nci.lazyHierarchy")) {
+                String endpoint = System.getProperty("nci.tripleStore.url", "http://localhost:8890/sparql/");
+                String graph = System.getProperty("nci.tripleStore.graph");
+                assertedClassHierarchyProvider =
+                        new VirtuosoClassHierarchyProvider(mngr.getOWLOntologyManager(), endpoint, graph);
+            } else {
+                assertedClassHierarchyProvider = new AssertedClassHierarchyProvider(mngr.getOWLOntologyManager());
+            }
             assertedClassHierarchyProvider.setOntologies(mngr.getActiveOntologies());
         }
         return assertedClassHierarchyProvider;
