@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -88,33 +89,79 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         if (graph == null || graph.isEmpty()) {
             return Collections.emptySet();
         }
-        return childrenCache.computeIfAbsent(object, this::queryChildren);
+        Set<OWLClass> cached = childrenCache.get(object);
+        if (cached != null) {
+            return cached;
+        }
+        if (object.equals(thing)) {
+            Set<OWLClass> roots = runClassQuery(thingChildrenQuery(), "c");
+            childrenCache.put(object, roots);
+            return roots;
+        }
+        return fetchChildrenAndGrandchildren(object);
     }
 
-    private Set<OWLClass> queryChildren(OWLClass object) {
-        final String query;
-        if (object.equals(thing)) {
-            // Children of owl:Thing = named classes with no named superclass and no named genus
-            // (the roots/orphans), mirroring AssertedClassHierarchyProvider's terminal elements.
-            query = PREFIXES
-                  + "SELECT DISTINCT ?c WHERE { GRAPH <" + graph + "> { "
-                  + "  ?c rdf:type owl:Class . "
-                  + "  FILTER(isIRI(?c) && ?c != owl:Thing && ?c != owl:Nothing) "
-                  + "  FILTER NOT EXISTS { ?c rdfs:subClassOf ?sup . FILTER(isIRI(?sup) && ?sup != owl:Thing) } "
-                  + "  FILTER NOT EXISTS { ?c owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . "
-                  + "                      ?l rdf:rest*/rdf:first ?g . FILTER(isIRI(?g)) } "
-                  + "} }";
-        } else {
-            final String p = object.getIRI().toString();
-            query = PREFIXES
-                  + "SELECT DISTINCT ?c WHERE { GRAPH <" + graph + "> { "
-                  + "  { ?c rdfs:subClassOf <" + p + "> } "
-                  + "  UNION "
-                  + "  { ?c owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . ?l rdf:rest*/rdf:first <" + p + "> } "
-                  + "  FILTER(isIRI(?c) && ?c != <" + p + ">) "
-                  + "} }";
+    private String thingChildrenQuery() {
+        // Children of owl:Thing = named classes with no named superclass and no named genus
+        // (the roots/orphans), mirroring AssertedClassHierarchyProvider's terminal elements.
+        return PREFIXES
+              + "SELECT DISTINCT ?c WHERE { GRAPH <" + graph + "> { "
+              + "  ?c rdf:type owl:Class . "
+              + "  FILTER(isIRI(?c) && ?c != owl:Thing && ?c != owl:Nothing) "
+              + "  FILTER NOT EXISTS { ?c rdfs:subClassOf ?sup . FILTER(isIRI(?sup) && ?sup != owl:Thing) } "
+              + "  FILTER NOT EXISTS { ?c owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . "
+              + "                      ?l rdf:rest*/rdf:first ?g . FILTER(isIRI(?g)) } "
+              + "} }";
+    }
+
+    // Fetch a parent's children AND each child's children in one query, caching every child's child
+    // set so the tree's per-child +box lookups (a getChildren call on each child) are cache hits
+    // instead of a SPARQL round-trip each -- the "one depth ahead" prefetch in a single query.
+    private Set<OWLClass> fetchChildrenAndGrandchildren(OWLClass parent) {
+        final String p = parent.getIRI().toString();
+        final String query = PREFIXES
+              + "SELECT DISTINCT ?c ?gc WHERE { GRAPH <" + graph + "> { "
+              + "  { ?c rdfs:subClassOf <" + p + "> } "
+              + "  UNION "
+              + "  { ?c owl:equivalentClass ?e1 . ?e1 owl:intersectionOf ?l1 . ?l1 rdf:rest*/rdf:first <" + p + "> } "
+              + "  FILTER(isIRI(?c) && ?c != <" + p + ">) "
+              + "  OPTIONAL { "
+              + "    { ?gc rdfs:subClassOf ?c } "
+              + "    UNION "
+              + "    { ?gc owl:equivalentClass ?e2 . ?e2 owl:intersectionOf ?l2 . ?l2 rdf:rest*/rdf:first ?c } "
+              + "    FILTER(isIRI(?gc) && ?gc != ?c) "
+              + "  } "
+              + "} }";
+
+        Set<OWLClass> children = new HashSet<>();
+        Map<OWLClass, Set<OWLClass>> grandchildren = new HashMap<>();
+        try (RepositoryConnection conn = repository.getConnection()) {
+            TupleQuery tupleQuery = conn.prepareTupleQuery(QueryLanguage.SPARQL, query);
+            try (TupleQueryResult rows = tupleQuery.evaluate()) {
+                while (rows.hasNext()) {
+                    BindingSet row = rows.next();
+                    Value childValue = row.getValue("c");
+                    if (childValue == null) {
+                        continue;
+                    }
+                    OWLClass child = df.getOWLClass(IRI.create(childValue.stringValue()));
+                    children.add(child);
+                    Value grandchildValue = row.getValue("gc");
+                    if (grandchildValue != null) {
+                        grandchildren.computeIfAbsent(child, k -> new HashSet<>())
+                                .add(df.getOWLClass(IRI.create(grandchildValue.stringValue())));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Two-level children query failed for {} (returning empty)", parent, e);
         }
-        return runClassQuery(query, "c");
+
+        childrenCache.put(parent, children);
+        for (OWLClass child : children) {
+            childrenCache.putIfAbsent(child, grandchildren.getOrDefault(child, Collections.emptySet()));
+        }
+        return children;
     }
 
     @Override
