@@ -3,9 +3,13 @@ package org.protege.editor.owl.model.triplestore;
 import org.eclipse.rdf4j.model.Value;
 import org.eclipse.rdf4j.query.BindingSet;
 import org.eclipse.rdf4j.query.BooleanQuery;
+import org.eclipse.rdf4j.query.GraphQuery;
+import org.eclipse.rdf4j.query.GraphQueryResult;
 import org.eclipse.rdf4j.query.QueryLanguage;
 import org.eclipse.rdf4j.query.TupleQuery;
 import org.eclipse.rdf4j.query.TupleQueryResult;
+import org.eclipse.rdf4j.model.Model;
+import org.eclipse.rdf4j.model.impl.LinkedHashModel;
 import org.eclipse.rdf4j.repository.RepositoryConnection;
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
 import org.slf4j.Logger;
@@ -108,6 +112,28 @@ public final class LazyTripleStore {
             logger.error("ASK failed (returning false): {}", query, e);
             return false;
         }
+    }
+
+    /** Runs a CONSTRUCT and returns the resulting triples (empty model on error). */
+    public Model construct(String query) {
+        Model model = new LinkedHashModel();
+        try (RepositoryConnection conn = repository.getConnection()) {
+            GraphQuery graphQuery = conn.prepareGraphQuery(QueryLanguage.SPARQL, query);
+            try (GraphQueryResult rows = graphQuery.evaluate()) {
+                while (rows.hasNext()) {
+                    model.add(rows.next());
+                }
+            }
+        } catch (Exception e) {
+            logger.error("CONSTRUCT failed (returning empty): {}", query, e);
+        }
+        return model;
+    }
+
+    /** All triples with the given IRI as subject, within the project graph. */
+    public Model describe(String subjectIri) {
+        return construct(PREFIXES + "CONSTRUCT { <" + subjectIri + "> ?p ?o } WHERE { GRAPH <"
+                + graph + "> { <" + subjectIri + "> ?p ?o } }");
     }
 
     public void shutDown() {
