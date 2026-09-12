@@ -1,7 +1,9 @@
 package org.protege.editor.owl.client.ui;
 
 import edu.stanford.protege.metaproject.api.AuthToken;
+import edu.stanford.protege.metaproject.api.Project;
 import edu.stanford.protege.metaproject.api.ProjectId;
+import edu.stanford.protege.metaproject.api.ServerConfiguration;
 import org.protege.editor.core.ui.util.JOptionPaneEx;
 import org.protege.editor.owl.OWLEditorKit;
 import org.protege.editor.owl.client.ClientPreferences;
@@ -13,6 +15,7 @@ import org.protege.editor.owl.client.api.OpenProjectResult;
 import org.protege.editor.owl.client.api.exception.LoginTimeoutException;
 import org.protege.editor.owl.client.api.exception.OWLClientException;
 import org.protege.editor.owl.model.OWLWorkspace;
+import org.protege.editor.owl.model.triplestore.TripleStoreContext;
 import org.protege.editor.owl.server.util.SnapShot;
 import org.protege.editor.owl.server.versioning.ChangeHistoryUtils;
 import org.protege.editor.owl.server.versioning.ReplaceChangedOntologyVisitor;
@@ -37,6 +40,9 @@ import java.util.List;
 public class OpenFromServerPanel extends JPanel {
 
     private static final long serialVersionUID = -6710802337675443598L;
+
+    private static final org.slf4j.Logger logger =
+            org.slf4j.LoggerFactory.getLogger(OpenFromServerPanel.class);
 
     private ClientSession clientSession;
 
@@ -212,6 +218,11 @@ public class OpenFromServerPanel extends JPanel {
             OpenProjectResult openProjectResult = httpClient.openProject(pid);
             ServerDocument serverDocument = openProjectResult.serverDocument;
 
+            // Gate the lazy read model on a real project: learn the triple store (Virtuoso) endpoint
+            // and named graph from the opened project the same way the server derives its write graph
+            // (project namespace + "/" + name), so the client never connects before a project is open.
+            configureTripleStore(httpClient, pid);
+
             progressBar.setValue(10);            
             dialog.setTitle("Checking Snapshot checksum....");
             Thread.sleep(1000);
@@ -302,6 +313,24 @@ public class OpenFromServerPanel extends JPanel {
         Window window = SwingUtilities.getWindowAncestor(OpenFromServerPanel.this);
         window.setVisible(false);
         window.dispose();
+    }
+
+    // Point the lazy read model at the opened project's Virtuoso graph, mirroring how the server
+    // derives its write graph (Project.namespace() + "/" + name) and reads the endpoint from the
+    // shared triple_store_url config property. Best-effort: on any failure the context stays
+    // unconfigured and the lazy read model simply remains dormant.
+    private void configureTripleStore(LocalHttpClient httpClient, ProjectId pid) {
+        try {
+            ServerConfiguration cfg = httpClient.getCurrentConfig();
+            String endpoint = cfg.getProperty("triple_store_url");
+            Project project = cfg.getProject(pid);
+            String graph = project.namespace() + "/" + project.getName().get();
+            TripleStoreContext.getInstance().configure(endpoint, graph);
+            logger.info("Lazy read model targeting triple store {} graph <{}>", endpoint, graph);
+        }
+        catch (Exception e) {
+            logger.warn("Could not configure triple store for project {}; lazy read model stays dormant", pid, e);
+        }
     }
     
     public boolean getFromImport() {
