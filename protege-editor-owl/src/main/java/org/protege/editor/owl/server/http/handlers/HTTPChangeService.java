@@ -149,16 +149,16 @@ public class HTTPChangeService extends BaseRoutingHandler {
 				|| requestPath.equals(ServerEndpoints.SQUASH)) {
 			ProjectId projectId = projectId(exchange);
 
+			// Lazy clients keep no local snapshot and send no checksum; only enforce the snapshot
+			// freshness check when a client actually provides a checksum (legacy snapshot clients).
 			String clientChecksum = exchange.getRequestHeaders().getFirst(ServerProperties.SNAPSHOT_CHECKSUM_HEADER);
-			if (clientChecksum == null) {
-				throw new ServerException(StatusCodes.BAD_REQUEST,
-						"project " + projectId + " does not have a checksum");
-			}
-			Optional<String> serverChecksum = serverLayer.getSnapshotChecksum(projectId);
-			if (serverChecksum.isPresent() && !clientChecksum.equals(serverChecksum.get())) {
-				throw new ServerException(ServerProperties.HISTORY_SNAPSHOT_OUT_OF_DATE,
-						"History snapshot out of date for " + projectId + ": " + clientChecksum + " != "
-								+ serverChecksum.get());
+			if (clientChecksum != null) {
+				Optional<String> serverChecksum = serverLayer.getSnapshotChecksum(projectId);
+				if (serverChecksum.isPresent() && !clientChecksum.equals(serverChecksum.get())) {
+					throw new ServerException(ServerProperties.HISTORY_SNAPSHOT_OUT_OF_DATE,
+							"History snapshot out of date for " + projectId + ": " + clientChecksum + " != "
+									+ serverChecksum.get());
+				}
 			}
 		}
 

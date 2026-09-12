@@ -224,19 +224,6 @@ public class OpenFromServerPanel extends JPanel {
             configureTripleStore(httpClient, pid);
 
             progressBar.setValue(10);            
-            dialog.setTitle("Checking Snapshot checksum....");
-            Thread.sleep(1000);
-            Optional<String> clientChecksum = httpClient.getSnapshotChecksum(pid);
-            if (clientChecksum.isPresent() &&
-                openProjectResult.snapshotChecksum.isPresent() &&
-                !clientChecksum.get().equals(openProjectResult.snapshotChecksum.get())) {            	
-            	progressBar.setValue(20);
-            	dialog.setTitle("Retrieving new snapshot....");
-            	Thread.sleep(1000);
-                SnapShot snapshot = httpClient.getSnapShot(pid);
-                httpClient.createLocalSnapShot(snapshot.getOntology(), pid);
-            }
-            
             if (serverDocument != null && pobj != null) {
             	String serverConnection = "Server: " + serverDocument.getServerAddress().toString() + " | User: " + httpClient.getUserInfo().getId() 
             			+ " | Project: " + pobj.toString();

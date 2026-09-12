@@ -26,12 +26,14 @@ import org.protege.editor.owl.client.event.ClientSessionChangeEvent;
 import org.protege.editor.owl.client.event.ClientSessionListener;
 import org.protege.editor.owl.client.util.ClientUtils;
 import org.protege.editor.owl.client.util.Config;
+import org.protege.editor.owl.model.triplestore.LazyTripleStore;
 import org.protege.editor.owl.server.api.CommitBundle;
 import org.protege.editor.owl.server.http.ServerProperties;
 import org.protege.editor.owl.server.http.messages.History;
 import org.protege.editor.owl.server.http.messages.HttpAuthResponse;
 import org.protege.editor.owl.server.http.messages.LoginCreds;
 import org.protege.editor.owl.server.util.SnapShot;
+import org.protege.editor.owl.server.versioning.ChangeHistoryImpl;
 import org.protege.editor.owl.server.versioning.VersionedOWLOntologyImpl;
 import org.protege.editor.owl.server.versioning.api.*;
 import org.protege.editor.owl.ui.util.ProgressDialog;
@@ -450,7 +452,6 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 	@Override
 	public ChangeHistory commit(@Nonnull ProjectId projectId, CommitBundle commitBundle)
 		throws AuthorizationException, ClientRequestException {
-		checkSnapshotChecksumPresent(projectId);
 		try {
 			ByteArrayOutputStream b = writeRequestArgumentsIntoByteStream(commitBundle);
 			Response response = postWithProjectId(COMMIT,
@@ -573,20 +574,33 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 			throws LoginTimeoutException, AuthorizationException, ClientRequestException {
 		if (pid == null) throw new IllegalArgumentException("projectId is null");
 		setCurrentProject(pid);
-		if (!getSnapShotFile(pid).get().exists()) {
-			SnapShot snapshot = getSnapShot(pid);
-			createLocalSnapShot(snapshot.getOntology(), pid);
+		// Lazy open: no snapshot download and no full-history replay. The active ontology starts empty
+		// and its content is materialised on demand from the triple store as the user walks the tree.
+		// The versioned ontology is anchored at the server's head revision so commits are based right.
+		OWLOntology targetOntology = createEmptyProjectOntology(owlManager);
+		DocumentRevision head = getRemoteHeadRevision(sdoc, pid);
+		return new VersionedOWLOntologyImpl(sdoc, targetOntology, ChangeHistoryImpl.createEmptyChangeHistory(head));
+	}
+
+	// The empty active ontology takes its IRI from the triple store (the source of truth) so commits
+	// carry the same ontology id the server/graph expect; anonymous if the graph has no owl:Ontology.
+	private OWLOntology createEmptyProjectOntology(OWLOntologyManager owlManager) throws ClientRequestException {
+		try {
+			LazyTripleStore store = new LazyTripleStore();
+			if (store.isConfigured()) {
+				String query = "PREFIX owl: <http://www.w3.org/2002/07/owl#> "
+						+ "SELECT ?o WHERE { GRAPH <" + store.graph() + "> { ?o a owl:Ontology } } LIMIT 1";
+				Optional<String> ontologyIri = store.selectFirst(query, "o");
+				store.shutDown();
+				if (ontologyIri.isPresent()) {
+					return owlManager.createOntology(IRI.create(ontologyIri.get()));
+				}
+			}
+			return owlManager.createOntology();
+		} catch (OWLOntologyCreationException e) {
+			logger.error(e.getMessage(), e);
+			throw new ClientRequestException("Unable to create the project ontology (see error log for details)", e);
 		}
-		kit.getSearchManager().disableIncrementalIndexing();
-		OWLOntology targetOntology = loadSnapShot(owlManager, pid);
-		
-		ChangeHistory remoteChangeHistory = getLatestChanges(sdoc, DocumentRevision.START_REVISION, pid);
-		logger.info("Loaded ontology, now updating from server");
-		ClientUtils.updateOntology(targetOntology, remoteChangeHistory, owlManager, this, kit);		
-		kit.getSearchManager().enableIncrementalIndexing();
-		
-		
-		return new VersionedOWLOntologyImpl(sdoc, targetOntology, remoteChangeHistory);
 	}
 
 	private void setCurrentProject(@Nonnull ProjectId pid) throws ClientRequestException {
@@ -742,8 +756,14 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 	public DocumentRevision getRemoteHeadRevision(VersionedOWLOntology vont, @Nonnull ProjectId projectId) throws
 		AuthorizationException, ClientRequestException {
 		if (projectId == null) throw new IllegalArgumentException("projectId is null");
+		return getRemoteHeadRevision(vont.getServerDocument(), projectId);
+	}
+
+	public DocumentRevision getRemoteHeadRevision(ServerDocument sdoc, @Nonnull ProjectId projectId) throws
+		AuthorizationException, ClientRequestException {
+		if (projectId == null) throw new IllegalArgumentException("projectId is null");
 		try {
-			HistoryFile historyFile = vont.getServerDocument().getHistoryFile();
+			HistoryFile historyFile = sdoc.getHistoryFile();
 			ByteArrayOutputStream b = writeRequestArgumentsIntoByteStream(historyFile);
 			Response response = postWithProjectId(HEAD,
 				RequestBody.create(ApplicationContentType, b.toByteArray()),
@@ -878,15 +898,15 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		if (projectId == null) {
 			throw new RuntimeException("POST projectId is null: " + url);
 		}
+		// Lazy open keeps no local snapshot, so send the snapshot checksum only when one exists.
 		Optional<String> snapshotChecksum = getSnapshotChecksum(projectId);
-		if (!snapshotChecksum.isPresent()) {
-			throw new RuntimeException("POST snapshot checksum is missing");
-		}
 
 		Request.Builder builder = postBuilder(url, body, withCredential);
 
 		builder.addHeader(ServerProperties.PROJECTID_HEADER, projectId.get());
-		builder.addHeader(ServerProperties.SNAPSHOT_CHECKSUM_HEADER, snapshotChecksum.get());
+		if (snapshotChecksum.isPresent()) {
+			builder.addHeader(ServerProperties.SNAPSHOT_CHECKSUM_HEADER, snapshotChecksum.get());
+		}
 
 		Response response = retryCall(builder.build(), 1);
 		
