@@ -11,6 +11,8 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -32,16 +34,16 @@ import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
 import org.protege.editor.owl.server.versioning.api.ServerDocument;
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
-import org.semanticweb.owlapi.model.AddAxiom;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLOntology;
-import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import gov.nih.nci.owlvirtuoso.ChangesetRdf;
+import gov.nih.nci.owlvirtuoso.RdfChangeSet;
 import gov.nih.nci.owlvirtuoso.SparqlStore;
+import gov.nih.nci.owlvirtuoso.Triple;
 
 import edu.stanford.protege.metaproject.ConfigurationManager;
 import edu.stanford.protege.metaproject.api.AuthToken;
@@ -67,9 +69,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	private static final PolicyFactory f = ConfigurationManager.getFactory();
 	private final ServerLayer serverLayer;
 
-	// Bulk-load the initial ontology into Virtuoso in batches of this many axioms per SPARQL Update.
+	// Load the initial ontology into Virtuoso in batches of this many TRIPLES per SPARQL update.
+	// Virtuoso's SPARQL compiler exhausts memory (SP030) on much larger INSERT DATA statements.
 	private static final String TRIPLESTORE = "triple_store_url";
-	private static final int TRIPLESTORE_BATCH = 5000;
+	private static final int TRIPLESTORE_BATCH = 500;
 	private boolean update_triple_store = false;
 	private String triple_store_url = "http://localhost:8890/sparql/";
 
@@ -405,21 +408,25 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			repository = new SPARQLRepository(triple_store_url);
 			repository.initialize();
 			SparqlStore store = new SparqlStore(repository, graph);
-			List<OWLOntologyChange> batch = new ArrayList<>(TRIPLESTORE_BATCH);
+			Set<Triple> pending = new HashSet<>();
+			// The ontology declaration (<ont> a owl:Ontology) is the ontology header, not an axiom, so
+			// add it explicitly: the lazy client discovers the ontology IRI from it.
+			if (ont.getOntologyID().getOntologyIRI().isPresent()) {
+				String ontologyIri = ont.getOntologyID().getOntologyIRI().get().toString();
+				pending.add(new Triple("<" + ontologyIri + ">",
+						"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>",
+						"<http://www.w3.org/2002/07/owl#Ontology>"));
+			}
 			long total = 0;
 			for (OWLAxiom axiom : ont.getAxioms()) {
-				batch.add(new AddAxiom(ont, axiom));
-				if (batch.size() >= TRIPLESTORE_BATCH) {
-					store.apply(ChangesetRdf.transform(batch));
-					total += batch.size();
-					batch.clear();
+				pending.addAll(ChangesetRdf.axiomToTriples(axiom));
+				if (pending.size() >= TRIPLESTORE_BATCH) {
+					total += flushTriples(store, pending, projectId);
+					pending = new HashSet<>();
 				}
 			}
-			if (!batch.isEmpty()) {
-				store.apply(ChangesetRdf.transform(batch));
-				total += batch.size();
-			}
-			logger.info("Loaded {} axioms into triple store graph <{}> for project {}", total, graph, projectId);
+			total += flushTriples(store, pending, projectId);
+			logger.info("Loaded {} triples into triple store graph <{}> for project {}", total, graph, projectId);
 		}
 		catch (Exception e) {
 			logger.error("Failed to load project " + projectId + " into the triple store; "
@@ -434,6 +441,23 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 					logger.warn("Error shutting down triple store connection", e);
 				}
 			}
+		}
+	}
+
+	// Insert one batch of triples as a single small SPARQL update. A failed batch is logged and
+	// skipped so one bad batch does not abort the whole load.
+	private long flushTriples(SparqlStore store, Set<Triple> triples, ProjectId projectId) {
+		if (triples.isEmpty()) {
+			return 0;
+		}
+		try {
+			store.apply(new RdfChangeSet(triples, Collections.<Triple>emptySet()));
+			return triples.size();
+		}
+		catch (Exception e) {
+			logger.error("Triple store batch of " + triples.size() + " triples failed for " + projectId
+					+ "; continuing", e);
+			return 0;
 		}
 	}
 
