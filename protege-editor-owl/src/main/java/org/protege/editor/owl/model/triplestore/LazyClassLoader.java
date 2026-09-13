@@ -16,6 +16,7 @@ import org.protege.editor.owl.client.SessionRecorder;
 import org.protege.editor.owl.model.OWLModelManager;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLClass;
+import org.semanticweb.owlapi.model.OWLDataFactory;
 import org.semanticweb.owlapi.model.OWLOntology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,10 +118,33 @@ public final class LazyClassLoader {
                     + "FILTER(?t IN (owl:AnnotationProperty, owl:ObjectProperty, "
                     + "owl:DatatypeProperty, rdfs:Datatype)) } }", "s");
             int count = materialise(fetchClosure(seeds), editorKit);
+            declareStandardAnnotationProperties(editorKit);
             schemaLoaded = true;
             logger.info("Lazily loaded schema: {} axioms from {} entities", count, seeds.size());
         } catch (Exception e) {
             logger.error("Failed to lazily load schema", e);
+        }
+    }
+
+    /**
+     * rdfs:label / rdfs:comment are used on entities but not declared in the graph, so the schema
+     * seed query misses them. Declare them so they are in the ontology signature (e.g. the search
+     * tab's annotation-property list) from the start rather than only after a class that uses them
+     * is loaded.
+     */
+    private void declareStandardAnnotationProperties(OWLEditorKit editorKit) {
+        OWLModelManager modelManager = editorKit.getOWLModelManager();
+        OWLDataFactory df = modelManager.getOWLDataFactory();
+        Set<OWLAxiom> declarations = new HashSet<>();
+        declarations.add(df.getOWLDeclarationAxiom(df.getRDFSLabel()));
+        declarations.add(df.getOWLDeclarationAxiom(df.getRDFSComment()));
+        OWLOntology target = modelManager.getActiveOntology();
+        SessionRecorder recorder = SessionRecorder.getInstance(editorKit);
+        recorder.stopRecording();
+        try {
+            modelManager.getOWLOntologyManager().addAxioms(target, declarations.stream());
+        } finally {
+            recorder.startRecording();
         }
     }
 
