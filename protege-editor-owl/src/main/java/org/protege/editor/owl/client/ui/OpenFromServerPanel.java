@@ -305,17 +305,22 @@ public class OpenFromServerPanel extends JPanel {
     }
 
     // Fetch the server-built base index and seed the local index if none exists yet, recording the
-    // revision it reflects so the catch-up replays only the changesets after it. Best-effort.
+    // revision it reflects so the catch-up replays only the changesets after it. Best-effort. The
+    // index dir id must match what the search manager uses for the project (the project id).
     private void seedSearchIndex(LocalHttpClient httpClient, ProjectId pid, VersionedOWLOntology vont) {
         if (indexSeeder == null) {
             return;
         }
         try {
+            String indexDirId = pid.get();
+            if (indexSeeder.hasLocalIndex(indexDirId)) {
+                return; // already seeded/built locally; the changeset catch-up keeps it current
+            }
             IndexData data = httpClient.getProjectIndex(pid);
             if (data == null) {
                 return;
             }
-            if (indexSeeder.seedIndex(vont.getOntology(), data.getZip())) {
+            if (indexSeeder.seedIndex(indexDirId, data.getZip())) {
                 ClientPreferences.getInstance().setNoServerRevisionsIndexed(data.getRevision());
             }
         }
