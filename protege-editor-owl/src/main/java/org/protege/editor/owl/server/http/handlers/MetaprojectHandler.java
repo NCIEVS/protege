@@ -1,15 +1,23 @@
 package org.protege.editor.owl.server.http.handlers;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import edu.stanford.protege.metaproject.impl.ServerStatus;
 import org.protege.editor.owl.server.api.ServerLayer;
@@ -19,6 +27,7 @@ import org.protege.editor.owl.server.http.HTTPServer;
 import org.protege.editor.owl.server.http.ServerEndpoints;
 import org.protege.editor.owl.server.http.ServerProperties;
 import org.protege.editor.owl.server.http.exception.ServerException;
+import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
 import org.protege.editor.owl.server.versioning.api.ServerDocument;
@@ -64,6 +73,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	private boolean update_triple_store = false;
 	private String triple_store_url = "http://localhost:8890/sparql/";
 
+	// Present only when the search plugin is on the server classpath (ServiceLoader); null disables
+	// server-side index building.
+	private final ProjectIndexBuilder indexBuilder;
+
 	private boolean requiredRestarting = false;
 
 	public MetaprojectHandler(ServerLayer serverLayer) {
@@ -73,6 +86,18 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			update_triple_store = Boolean.parseBoolean((String) uts);
 			triple_store_url = serverLayer.getConfiguration().getProperty(TRIPLESTORE);
 		}
+		this.indexBuilder = loadIndexBuilder();
+	}
+
+	private static ProjectIndexBuilder loadIndexBuilder() {
+		Iterator<ProjectIndexBuilder> it = ServiceLoader.load(ProjectIndexBuilder.class).iterator();
+		if (it.hasNext()) {
+			ProjectIndexBuilder builder = it.next();
+			logger.info("Server-side search index builder: {}", builder.getClass().getName());
+			return builder;
+		}
+		logger.info("No ProjectIndexBuilder on the classpath; server-side search indexing is disabled");
+		return null;
 	}
 
 	@Override
@@ -156,6 +181,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 		else if (requestPath.equals(ServerEndpoints.PROJECT_SNAPSHOT) && requestMethod.equals(Methods.GET)) {
 			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
 			retrieveProjectSnapshot(projectId, exchange.getOutputStream());
+		}
+		else if (requestPath.equals(ServerEndpoints.PROJECT_INDEX) && requestMethod.equals(Methods.GET)) {
+			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
+			retrieveProjectIndex(projectId, exchange.getOutputStream());
 		}
 		else if (requestPath.equals(ServerEndpoints.METAPROJECT) && requestMethod.equals(Methods.GET)) {
 			retrieveMetaproject(exchange);
@@ -276,10 +305,89 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 		try {
 			serverLayer.saveProjectSnapshot(snapshot, projectId, os);
 			loadIntoTripleStore(projectId, snapshot.getOntology());
+			buildProjectIndex(projectId, snapshot.getOntology());
 		}
 		catch (IOException e) {
 			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to create project snapshot", e);
 		}
+	}
+
+	// Build the base Lucene index for the freshly-loaded ontology, reusing the client's indexer (via
+	// the ServiceLoader-provided builder). At creation the index reflects the base revision (0); a
+	// client seeds from it and replays only changesets after that revision. Non-fatal on failure.
+	private void buildProjectIndex(ProjectId projectId, OWLOntology ont) {
+		if (indexBuilder == null) {
+			return;
+		}
+		try {
+			File dir = indexDirectory(projectId);
+			indexBuilder.buildIndex(ont, dir);
+			writeIndexRevision(projectId, 0);
+			logger.info("Built search index for project {} at {}", projectId, dir);
+		}
+		catch (Exception e) {
+			logger.error("Failed to build search index for project " + projectId, e);
+		}
+	}
+
+	// Serve the project's Lucene index as one zip plus the revision it reflects, so a client can seed
+	// its local index and then replay only the changesets after that revision.
+	private void retrieveProjectIndex(ProjectId projectId, OutputStream os) throws ServerException {
+		try {
+			File dir = indexDirectory(projectId);
+			if (!dir.isDirectory()) {
+				throw new ServerException(StatusCodes.NOT_FOUND, "No search index for project " + projectId);
+			}
+			String revision = readIndexRevision(projectId);
+			byte[] zip = zipDirectory(dir);
+			ObjectOutputStream oos = new ObjectOutputStream(os);
+			oos.writeObject(revision);
+			oos.writeObject(zip);
+		}
+		catch (IOException e) {
+			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to transmit the index", e);
+		}
+	}
+
+	private File indexDirectory(ProjectId projectId) {
+		return new File(serverLayer.getHistoryFilePath(projectId) + "-index");
+	}
+
+	private File indexRevisionFile(ProjectId projectId) {
+		return new File(serverLayer.getHistoryFilePath(projectId) + "-index.revision");
+	}
+
+	private void writeIndexRevision(ProjectId projectId, int revision) throws IOException {
+		try (OutputStream os = new FileOutputStream(indexRevisionFile(projectId))) {
+			os.write(String.valueOf(revision).getBytes(StandardCharsets.UTF_8));
+		}
+	}
+
+	private String readIndexRevision(ProjectId projectId) {
+		try {
+			return new String(Files.readAllBytes(indexRevisionFile(projectId).toPath()), StandardCharsets.UTF_8).trim();
+		}
+		catch (IOException e) {
+			return "0";
+		}
+	}
+
+	// A Lucene FSDirectory is a flat set of files; zip them (non-recursive) into a byte array.
+	private static byte[] zipDirectory(File dir) throws IOException {
+		ByteArrayOutputStream bos = new ByteArrayOutputStream();
+		try (ZipOutputStream zos = new ZipOutputStream(bos)) {
+			File[] files = dir.listFiles();
+			if (files != null) {
+				for (File file : files) {
+					if (file.isFile()) {
+						zos.putNextEntry(new ZipEntry(file.getName()));
+						Files.copy(file.toPath(), zos);
+						zos.closeEntry();
+					}
+				}
+			}
+		}
+		return bos.toByteArray();
 	}
 
 	// Load a project's ontology into its Virtuoso named graph in batches, reusing the same
