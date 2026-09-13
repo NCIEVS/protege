@@ -50,6 +50,7 @@ public final class LazyClassLoader {
     private static final Logger logger = LoggerFactory.getLogger(LazyClassLoader.class);
 
     private static final String SKOLEM_PREFIX = "urn:skolem:";
+    private static final int SCHEMA_SEED_BATCH = 200;
     private static final String RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
     private static final String RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#";
     private static final String OWL_NS = "http://www.w3.org/2002/07/owl#";
@@ -164,12 +165,39 @@ public final class LazyClassLoader {
                 + "?s ?p ?o } } }");
     }
 
+    // Materialise the schema without the per-seed structural-path loop (which blocked open ~24s):
+    // properties need only their own triples (fast VALUES CONSTRUCTs), and only datatypes carry a
+    // structural (oneOf enum) closure, fetched for all of them in one query.
     private Model fetchClosure(java.util.Collection<String> seeds) {
         Model total = new LinkedHashModel();
-        for (String seed : seeds) {
-            total.addAll(closure(seed));
+        java.util.List<String> list = new java.util.ArrayList<>(seeds);
+        for (int i = 0; i < list.size(); i += SCHEMA_SEED_BATCH) {
+            total.addAll(directTriples(list.subList(i, Math.min(i + SCHEMA_SEED_BATCH, list.size()))));
         }
+        total.addAll(datatypeClosure());
         return total;
+    }
+
+    // A batch of seeds' own triples in one CONSTRUCT (no property path -- fast).
+    private Model directTriples(java.util.Collection<String> seeds) {
+        StringBuilder values = new StringBuilder();
+        for (String seed : seeds) {
+            values.append('<').append(seed).append("> ");
+        }
+        return store.construct(LazyTripleStore.PREFIXES
+                + "CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + store.graph() + "> { "
+                + "VALUES ?s { " + values + "} ?s ?p ?o } }");
+    }
+
+    // Every datatype's structural (oneOf enum) closure in one CONSTRUCT; the transitive path is far
+    // too slow to evaluate once per seed, but cheap scoped to the handful of datatypes.
+    private Model datatypeClosure() {
+        return store.construct(LazyTripleStore.PREFIXES
+                + "CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + store.graph() + "> { "
+                + "?dt a rdfs:Datatype . ?dt (rdfs:subClassOf|owl:equivalentClass) ?entry . "
+                + "?entry " + STRUCTURAL_PATH + " ?s . "
+                + "FILTER(isBlank(?s) || STRSTARTS(STR(?s), \"" + SKOLEM_PREFIX + "\")) "
+                + "?s ?p ?o } }");
     }
 
     private Model fetchMolecule(String classIri) {
