@@ -22,10 +22,17 @@ import org.protege.editor.owl.server.http.exception.ServerException;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
 import org.protege.editor.owl.server.versioning.api.ServerDocument;
+import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
+import org.semanticweb.owlapi.model.AddAxiom;
+import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLOntology;
+import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import gov.nih.nci.owlvirtuoso.ChangesetRdf;
+import gov.nih.nci.owlvirtuoso.SparqlStore;
 
 import edu.stanford.protege.metaproject.ConfigurationManager;
 import edu.stanford.protege.metaproject.api.AuthToken;
@@ -51,10 +58,21 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	private static final PolicyFactory f = ConfigurationManager.getFactory();
 	private final ServerLayer serverLayer;
 
+	// Bulk-load the initial ontology into Virtuoso in batches of this many axioms per SPARQL Update.
+	private static final String TRIPLESTORE = "triple_store_url";
+	private static final int TRIPLESTORE_BATCH = 5000;
+	private boolean update_triple_store = false;
+	private String triple_store_url = "http://localhost:8890/sparql/";
+
 	private boolean requiredRestarting = false;
 
 	public MetaprojectHandler(ServerLayer serverLayer) {
 		this.serverLayer = serverLayer;
+		Object uts = System.getProperty(HTTPServer.UPDATE_TRIPLE_STORE);
+		if (uts != null) {
+			update_triple_store = Boolean.parseBoolean((String) uts);
+			triple_store_url = serverLayer.getConfiguration().getProperty(TRIPLESTORE);
+		}
 	}
 
 	@Override
@@ -257,9 +275,57 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	private void createProjectSnapshot(ProjectId projectId, SnapShot snapshot, OutputStream os) throws ServerException {
 		try {
 			serverLayer.saveProjectSnapshot(snapshot, projectId, os);
+			loadIntoTripleStore(projectId, snapshot.getOntology());
 		}
 		catch (IOException e) {
 			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to create project snapshot", e);
+		}
+	}
+
+	// Load a project's ontology into its Virtuoso named graph in batches, reusing the same
+	// ChangesetRdf -> SparqlStore path as commits so the initial triples match committed ones. The
+	// graph is derived like the commit write path (project namespace + "/" + name). At creation the
+	// history is empty (head 0), so the marker is left unset and the first commit replays from START.
+	private void loadIntoTripleStore(ProjectId projectId, OWLOntology ont) {
+		if (!update_triple_store) {
+			return;
+		}
+		SPARQLRepository repository = null;
+		try {
+			Project project = serverLayer.getConfiguration().getProject(projectId);
+			String graph = project.namespace() + "/" + project.getName().get();
+			repository = new SPARQLRepository(triple_store_url);
+			repository.initialize();
+			SparqlStore store = new SparqlStore(repository, graph);
+			List<OWLOntologyChange> batch = new ArrayList<>(TRIPLESTORE_BATCH);
+			long total = 0;
+			for (OWLAxiom axiom : ont.getAxioms()) {
+				batch.add(new AddAxiom(ont, axiom));
+				if (batch.size() >= TRIPLESTORE_BATCH) {
+					store.apply(ChangesetRdf.transform(batch));
+					total += batch.size();
+					batch.clear();
+				}
+			}
+			if (!batch.isEmpty()) {
+				store.apply(ChangesetRdf.transform(batch));
+				total += batch.size();
+			}
+			logger.info("Loaded {} axioms into triple store graph <{}> for project {}", total, graph, projectId);
+		}
+		catch (Exception e) {
+			logger.error("Failed to load project " + projectId + " into the triple store; "
+					+ "the snapshot is saved and the load can be retried via update snapshot", e);
+		}
+		finally {
+			if (repository != null) {
+				try {
+					repository.shutDown();
+				}
+				catch (Exception e) {
+					logger.warn("Error shutting down triple store connection", e);
+				}
+			}
 		}
 	}
 
