@@ -449,6 +449,27 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		return new OpenProjectResult(sdoc, checksum);
 	}
 
+	// Fetch the server-built base search index (zip + the revision it reflects), or null when the
+	// server has no index for the project (e.g. indexing disabled). Best-effort: never fatal to open.
+	public org.protege.editor.owl.client.index.IndexData getProjectIndex(@Nonnull ProjectId projectId) {
+		if (projectId == null) throw new IllegalArgumentException("projectId is null");
+		Response response = null;
+		try {
+			response = get(PROJECT_INDEX + "?projectid=" + projectId.get());
+			ObjectInputStream ois = new ObjectInputStream(response.body().byteStream());
+			String revision = (String) ois.readObject();
+			byte[] zip = (byte[]) ois.readObject();
+			return new org.protege.editor.owl.client.index.IndexData(Integer.parseInt(revision), zip);
+		} catch (Exception e) {
+			logger.info("No server search index for project {} ({})", projectId, e.getMessage());
+			return null;
+		} finally {
+			if (response != null) {
+				response.body().close();
+			}
+		}
+	}
+
 	@Override
 	public ChangeHistory commit(@Nonnull ProjectId projectId, CommitBundle commitBundle)
 		throws AuthorizationException, ClientRequestException {

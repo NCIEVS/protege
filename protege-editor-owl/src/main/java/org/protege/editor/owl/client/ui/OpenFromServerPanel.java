@@ -14,9 +14,12 @@ import org.protege.editor.owl.client.api.Client;
 import org.protege.editor.owl.client.api.OpenProjectResult;
 import org.protege.editor.owl.client.api.exception.LoginTimeoutException;
 import org.protege.editor.owl.client.api.exception.OWLClientException;
+import org.protege.editor.owl.client.index.IndexData;
+import org.protege.editor.owl.client.index.ProjectIndexSeeder;
 import org.protege.editor.owl.model.OWLWorkspace;
 import org.protege.editor.owl.model.triplestore.TripleStoreContext;
 import org.protege.editor.owl.server.util.SnapShot;
+import org.protege.editor.owl.server.versioning.api.ChangeHistory;
 import org.protege.editor.owl.server.versioning.ChangeHistoryUtils;
 import org.protege.editor.owl.server.versioning.ReplaceChangedOntologyVisitor;
 import org.protege.editor.owl.server.versioning.api.DocumentRevision;
@@ -58,6 +61,15 @@ public class OpenFromServerPanel extends JPanel {
     private JProgressBar progressBar;
     private JDialog dialog;
     private boolean fromImport;
+
+    // Present only when the search plugin is on the classpath (ServiceLoader); null skips seeding.
+    private final ProjectIndexSeeder indexSeeder = loadIndexSeeder();
+
+    private static ProjectIndexSeeder loadIndexSeeder() {
+        java.util.Iterator<ProjectIndexSeeder> it =
+                java.util.ServiceLoader.load(ProjectIndexSeeder.class).iterator();
+        return it.hasNext() ? it.next() : null;
+    }
 
     public OpenFromServerPanel(ClientSession clientSession, OWLEditorKit editorKit) {
         this.clientSession = clientSession;
@@ -238,7 +250,11 @@ public class OpenFromServerPanel extends JPanel {
             editorKit.getSearchManager().disableIncrementalIndexing();
             VersionedOWLOntology vont = httpClient.buildVersionedOntology(serverDocument, owlManager, 
             		pid, editorKit);
-            
+
+            // Seed the local search index from the server-built base index before the workspace
+            // activates the project (so the plugin finds a populated index instead of building empty).
+            seedSearchIndex(httpClient, pid, vont);
+
             progressBar.setValue(80);
             dialog.setTitle("Updating menus and components...."); 
             Thread.sleep(1000);
@@ -250,25 +266,11 @@ public class OpenFromServerPanel extends JPanel {
             
             progressBar.setValue(90);
             dialog.setTitle("Updating search indices...");
-            
-            // let's store the revision number rather than changes number
-            int rev_no_processed = ClientPreferences.getInstance().getNoServerRevisionsIndexed();
-        	
-            if (!vont.getChangeHistory().isEmpty()) {
-                for (DocumentRevision rev : vont.getChangeHistory().getRevisions().keySet()) {
-                	if (rev.getRevisionNumber() > rev_no_processed) {
-                		editorKit
-                		.getSearchManager()
-                		.updateIndex(vont.getChangeHistory().getChangesForRevision(rev));
-                	}
-                }
-            }
-            
-            
-            ClientPreferences.getInstance().setNoServerRevisionsIndexed(vont.getChangeHistory().getHeadRevision().getRevisionNumber());
-            
-            
-            
+
+            // Bring the index up to head by replaying only the changesets after the last indexed
+            // revision (the seeded base revision on first open, or the persisted marker on restart).
+            catchUpSearchIndex(httpClient, serverDocument, pid, vont);
+
             SessionRecorder.getInstance(this.editorKit).startRecording();
             editorKit.getSearchManager().enableIncrementalIndexing();
             
@@ -300,6 +302,46 @@ public class OpenFromServerPanel extends JPanel {
         Window window = SwingUtilities.getWindowAncestor(OpenFromServerPanel.this);
         window.setVisible(false);
         window.dispose();
+    }
+
+    // Fetch the server-built base index and seed the local index if none exists yet, recording the
+    // revision it reflects so the catch-up replays only the changesets after it. Best-effort.
+    private void seedSearchIndex(LocalHttpClient httpClient, ProjectId pid, VersionedOWLOntology vont) {
+        if (indexSeeder == null) {
+            return;
+        }
+        try {
+            IndexData data = httpClient.getProjectIndex(pid);
+            if (data == null) {
+                return;
+            }
+            if (indexSeeder.seedIndex(vont.getOntology(), data.getZip())) {
+                ClientPreferences.getInstance().setNoServerRevisionsIndexed(data.getRevision());
+            }
+        }
+        catch (Exception e) {
+            logger.warn("Could not seed the search index for project {}", pid, e);
+        }
+    }
+
+    // Replay changesets after the last indexed revision into the search index, then advance the
+    // marker to head. Only the changes since the client was last active are fetched and applied.
+    private void catchUpSearchIndex(LocalHttpClient httpClient, ServerDocument sdoc, ProjectId pid,
+            VersionedOWLOntology vont) {
+        try {
+            int marker = ClientPreferences.getInstance().getNoServerRevisionsIndexed();
+            int head = vont.getHeadRevision().getRevisionNumber();
+            if (marker < head) {
+                ChangeHistory since = httpClient.getLatestChanges(sdoc, DocumentRevision.create(marker), pid);
+                for (DocumentRevision rev : since.getRevisions().keySet()) {
+                    editorKit.getSearchManager().updateIndex(since.getChangesForRevision(rev));
+                }
+            }
+            ClientPreferences.getInstance().setNoServerRevisionsIndexed(head);
+        }
+        catch (Exception e) {
+            logger.warn("Could not update the search index from changesets for project {}", pid, e);
+        }
     }
 
     // Point the lazy read model at the opened project's Virtuoso graph, mirroring how the server
