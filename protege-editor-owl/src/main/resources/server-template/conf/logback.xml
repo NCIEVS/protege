@@ -30,7 +30,9 @@
     </appender>
     
     
-    <logger name="org.protege.editor.owl.server" level="${client.server.comm.level:-info}">
+    <!-- additivity=false: this logger's appenders are the same as root's, so without it every
+         org.protege.editor.owl.server line would be written twice. -->
+    <logger name="org.protege.editor.owl.server" level="${client.server.comm.level:-info}" additivity="false">
         <appender-ref ref="stdout"/>
     	<appender-ref ref="rolling-files"/>
     </logger>   
