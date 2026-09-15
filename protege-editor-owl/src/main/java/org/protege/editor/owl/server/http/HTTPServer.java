@@ -13,6 +13,7 @@ import io.undertow.server.HttpHandler;
 import io.undertow.server.RoutingHandler;
 import io.undertow.server.handlers.BlockingHandler;
 import io.undertow.server.handlers.GracefulShutdownHandler;
+import io.undertow.server.handlers.SetHeaderHandler;
 import io.undertow.server.handlers.resource.PathResourceManager;
 import io.undertow.server.handlers.resource.ResourceHandler;
 import io.undertow.util.StatusCodes;
@@ -252,7 +253,12 @@ public final class HTTPServer {
 		// Build the servers
 		webRouterHandler = Handlers.gracefulShutdown(Handlers.exceptionHandler(webRouter));
 		//adminRouterHandler = Handlers.gracefulShutdown(Handlers.exceptionHandler(adminRouter));
-		
+
+		// Emit HSTS on every response. A TLS-terminating proxy fronts the server in deployment, but
+		// this backend listener is directly reachable (and scanned), so it must set the header itself.
+		HttpHandler rootHandler = new SetHeaderHandler(webRouterHandler,
+				"Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+
 		logger.info("Starting server instances");
 		final URI serverHostUri = serverConfiguration.getHost().getUri();
 		if (serverHostUri.getScheme().equalsIgnoreCase("https")) {
@@ -260,7 +266,7 @@ public final class HTTPServer {
 			webServer = Undertow.builder()
 					.addHttpsListener(serverHostUri.getPort(), serverHostUri.getHost(), ctx)
 					.setServerOption(UndertowOptions.ALWAYS_SET_DATE, true)
-					.setHandler(webRouterHandler)
+					.setHandler(rootHandler)
 					.build();
 			webServer.start();
 			logger.info("... Web server has started at port " + serverHostUri.getPort());
@@ -270,7 +276,7 @@ public final class HTTPServer {
 			webServer = Undertow.builder()
 					.addHttpListener(serverHostUri.getPort(), serverHostUri.getHost())
 					.setServerOption(UndertowOptions.ALWAYS_SET_DATE, true)
-					.setHandler(webRouterHandler)
+					.setHandler(rootHandler)
 					.build();
 			webServer.start();
 			logger.info("... Web server has started at port " + serverHostUri.getPort());
