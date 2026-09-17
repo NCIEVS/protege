@@ -2,11 +2,15 @@ package org.protege.editor.owl.model.hierarchy;
 
 import org.protege.editor.owl.model.triplestore.LazyLabelCache;
 import org.protege.editor.owl.model.triplestore.LazyTripleStore;
+import org.semanticweb.owlapi.model.AddAxiom;
 import org.semanticweb.owlapi.model.IRI;
 import org.semanticweb.owlapi.model.OWLClass;
 import org.semanticweb.owlapi.model.OWLDataFactory;
 import org.semanticweb.owlapi.model.OWLOntology;
+import org.semanticweb.owlapi.model.OWLOntologyChange;
+import org.semanticweb.owlapi.model.OWLOntologyChangeListener;
 import org.semanticweb.owlapi.model.OWLOntologyManager;
+import org.semanticweb.owlapi.model.OWLSubClassOfAxiom;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,10 +50,15 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     private final Map<OWLClass, Set<OWLClass>> parentsCache = new ConcurrentHashMap<>();
     private final Map<OWLClass, Set<OWLClass>> equivalentsCache = new ConcurrentHashMap<>();
 
+    // Local edits go to the in-RAM ontology before they reach Virtuoso, so keep the browsing caches
+    // (and the tree) in step with named subClassOf add/removes instead of only re-querying the store.
+    private final OWLOntologyChangeListener ontologyListener = this::handleOntologyChanges;
+
     public VirtuosoClassHierarchyProvider(OWLOntologyManager manager) {
         super(manager);
         this.df = manager.getOWLDataFactory();
         this.thing = df.getOWLThing();
+        manager.addOntologyChangeListener(ontologyListener);
     }
 
     @Override
@@ -242,7 +251,50 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     @Override
     public void dispose() {
         super.dispose();
+        getManager().removeOntologyChangeListener(ontologyListener);
         clearCaches();
         store.shutDown();
+    }
+
+    // Reflect named subClassOf edits in the caches so a newly created/moved class appears (or a
+    // removed one disappears) without an app restart. Fires nodeChanged only for parents whose cached
+    // child set actually changed, so lazy schema/class materialisation -- which re-adds edges already
+    // in the cache -- does not cause an event storm. Defined-class (equivalentClass genus) edits are
+    // not tracked here yet; those parents refresh on the next uncached query.
+    private void handleOntologyChanges(List<? extends OWLOntologyChange> changes) {
+        Set<OWLClass> changedParents = new HashSet<>();
+        for (OWLOntologyChange change : changes) {
+            if (!change.isAxiomChange() || !(change.getAxiom() instanceof OWLSubClassOfAxiom)) {
+                continue;
+            }
+            OWLSubClassOfAxiom sc = (OWLSubClassOfAxiom) change.getAxiom();
+            if (sc.getSubClass().isAnonymous() || sc.getSuperClass().isAnonymous()) {
+                continue;
+            }
+            OWLClass sub = sc.getSubClass().asOWLClass();
+            OWLClass sup = sc.getSuperClass().asOWLClass();
+            if (updateChildEdge(sub, sup, change instanceof AddAxiom)) {
+                changedParents.add(sup);
+            }
+            parentsCache.remove(sub); // sub's parent set may have changed; re-query on demand
+        }
+        for (OWLClass parent : changedParents) {
+            fireNodeChanged(parent);
+        }
+    }
+
+    // Add/remove a child edge in the cached child set of sup; returns whether the set actually changed
+    // (false when sup is not cached, or the edge was already present/absent).
+    private boolean updateChildEdge(OWLClass sub, OWLClass sup, boolean add) {
+        Set<OWLClass> kids = childrenCache.get(sup);
+        if (kids == null) {
+            return false;
+        }
+        Set<OWLClass> updated = new HashSet<>(kids);
+        boolean changed = add ? updated.add(sub) : updated.remove(sub);
+        if (changed) {
+            childrenCache.put(sup, updated);
+        }
+        return changed;
     }
 }
