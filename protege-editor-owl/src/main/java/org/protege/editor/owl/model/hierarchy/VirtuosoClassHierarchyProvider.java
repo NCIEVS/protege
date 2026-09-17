@@ -119,44 +119,60 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
               + "} }";
     }
 
-    // Fetch a parent's children AND each child's children in one query, caching every child's child
-    // set so the tree's per-child +box lookups (a getChildren call on each child) are cache hits
-    // instead of a SPARQL round-trip each -- the "one depth ahead" prefetch in a single query.
+    // Fetch a parent's children AND each child's children, caching every child's child set so the
+    // tree's per-child +box lookups (a getChildren call on each child) are cache hits instead of a
+    // SPARQL round-trip each -- the "one depth ahead" prefetch. Done as TWO bounded queries rather
+    // than one nested two-level query: the grandchildren query binds the children with VALUES so the
+    // defined-class list path (rdf:rest*/rdf:first) is anchored, whereas the nested form left it over
+    // an unbounded variable and Virtuoso's cost estimator rejected it ("estimated execution time
+    // exceeds the limit").
     private Set<OWLClass> fetchChildrenAndGrandchildren(OWLClass parent) {
-        final String p = parent.getIRI().toString();
-        final String query = PREFIXES
-              + "SELECT DISTINCT ?c ?gc WHERE { GRAPH <" + store.graph() + "> { "
-              + "  { ?c rdfs:subClassOf <" + p + "> } "
-              + "  UNION "
-              + "  { ?c owl:equivalentClass ?e1 . ?e1 owl:intersectionOf ?l1 . ?l1 rdf:rest*/rdf:first <" + p + "> } "
-              + "  FILTER(isIRI(?c) && ?c != <" + p + ">) "
-              + "  OPTIONAL { "
-              + "    { ?gc rdfs:subClassOf ?c } "
-              + "    UNION "
-              + "    { ?gc owl:equivalentClass ?e2 . ?e2 owl:intersectionOf ?l2 . ?l2 rdf:rest*/rdf:first ?c } "
-              + "    FILTER(isIRI(?gc) && ?gc != ?c) "
-              + "  } "
-              + "} }";
-
-        Set<OWLClass> children = new HashSet<>();
+        Set<OWLClass> children = runClassQuery(childrenQuery(parent.getIRI().toString()), "c");
+        childrenCache.put(parent, children);
+        if (children.isEmpty()) {
+            return children;
+        }
         Map<OWLClass, Set<OWLClass>> grandchildren = new HashMap<>();
-        for (String[] row : store.selectPairs(query, "c", "gc")) {
-            if (row[0] == null) {
+        for (String[] row : store.selectPairs(grandchildrenQuery(children), "c", "gc")) {
+            if (row[0] == null || row[1] == null) {
                 continue;
             }
-            OWLClass child = df.getOWLClass(IRI.create(row[0]));
-            children.add(child);
-            if (row[1] != null) {
-                grandchildren.computeIfAbsent(child, k -> new HashSet<>())
-                        .add(df.getOWLClass(IRI.create(row[1])));
-            }
+            grandchildren.computeIfAbsent(df.getOWLClass(IRI.create(row[0])), k -> new HashSet<>())
+                    .add(df.getOWLClass(IRI.create(row[1])));
         }
-
-        childrenCache.put(parent, children);
         for (OWLClass child : children) {
             childrenCache.putIfAbsent(child, grandchildren.getOrDefault(child, Collections.emptySet()));
         }
         return children;
+    }
+
+    // A class's direct children: asserted subclasses or defined classes whose genus is the parent.
+    // Anchored on the parent, so the list path is bounded.
+    private String childrenQuery(String parentIri) {
+        return PREFIXES
+              + "SELECT DISTINCT ?c WHERE { GRAPH <" + store.graph() + "> { "
+              + "  { ?c rdfs:subClassOf <" + parentIri + "> } "
+              + "  UNION "
+              + "  { ?c owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first <" + parentIri + "> } "
+              + "  FILTER(isIRI(?c) && ?c != <" + parentIri + ">) "
+              + "} }";
+    }
+
+    // The children of a known set of classes, the set bound by VALUES so each anchor is fixed and the
+    // list path stays bounded (unlike a nested grandchildren OPTIONAL over an unbound variable).
+    private String grandchildrenQuery(Set<OWLClass> classes) {
+        StringBuilder values = new StringBuilder();
+        for (OWLClass c : classes) {
+            values.append('<').append(c.getIRI()).append("> ");
+        }
+        return PREFIXES
+              + "SELECT DISTINCT ?c ?gc WHERE { GRAPH <" + store.graph() + "> { "
+              + "  VALUES ?c { " + values + "} "
+              + "  { ?gc rdfs:subClassOf ?c } "
+              + "  UNION "
+              + "  { ?gc owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?c } "
+              + "  FILTER(isIRI(?gc) && ?gc != ?c) "
+              + "} }";
     }
 
     @Override
