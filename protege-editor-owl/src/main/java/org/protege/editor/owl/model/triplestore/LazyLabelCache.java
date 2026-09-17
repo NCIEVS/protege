@@ -1,6 +1,9 @@
 package org.protege.editor.owl.model.triplestore;
 
 import org.semanticweb.owlapi.model.IRI;
+import org.semanticweb.owlapi.model.OWLAnnotationAssertionAxiom;
+import org.semanticweb.owlapi.model.OWLLiteral;
+import org.semanticweb.owlapi.model.OWLOntology;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -100,5 +103,48 @@ public final class LazyLabelCache {
 
     public void clear() {
         cache.clear();
+    }
+
+    /** Whether this annotation property drives the display label (rdfs:label or the NCI pref name). */
+    public boolean isLabelProperty(IRI property) {
+        String s = property.toString();
+        return RDFS_LABEL.equals(s) || prefNameProperty.equals(s);
+    }
+
+    /**
+     * Recompute a subject's cached label from the in-RAM ontologies, which hold the user's fresh
+     * label edits before they reach the store. Keeps the renderer/tree from showing a stale label (or
+     * the bare code) until the next commit+restart. rdfs:label wins over the pref name; when no label
+     * annotation remains in RAM the entry is dropped so the next render refetches from the store.
+     * Returns whether the cached value effectively changed (so the caller can fire a repaint).
+     */
+    public boolean refreshFromModel(IRI subject, Iterable<? extends OWLOntology> ontologies) {
+        String computed = computeLabel(subject, ontologies);
+        String previous = cache.get(subject);
+        if (computed != null) {
+            cache.put(subject, computed);
+            return !computed.equals(previous);
+        }
+        return cache.remove(subject) != null;
+    }
+
+    private String computeLabel(IRI subject, Iterable<? extends OWLOntology> ontologies) {
+        String pref = null;
+        for (OWLOntology ont : ontologies) {
+            for (OWLAnnotationAssertionAxiom ax : ont.getAnnotationAssertionAxioms(subject)) {
+                if (!(ax.getValue() instanceof OWLLiteral)) {
+                    continue;
+                }
+                String literal = ((OWLLiteral) ax.getValue()).getLiteral();
+                String property = ax.getProperty().getIRI().toString();
+                if (RDFS_LABEL.equals(property)) {
+                    return literal; // rdfs:label is the preferred label
+                }
+                if (prefNameProperty.equals(property)) {
+                    pref = literal;
+                }
+            }
+        }
+        return pref;
     }
 }

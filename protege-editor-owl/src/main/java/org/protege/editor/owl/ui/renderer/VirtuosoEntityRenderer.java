@@ -1,8 +1,17 @@
 package org.protege.editor.owl.ui.renderer;
 
 import org.protege.editor.owl.OWLEditorKit;
+import org.protege.editor.owl.model.OWLModelManager;
 import org.protege.editor.owl.model.triplestore.LazyLabelCache;
 import org.semanticweb.owlapi.model.IRI;
+import org.semanticweb.owlapi.model.OWLAnnotationAssertionAxiom;
+import org.semanticweb.owlapi.model.OWLAxiom;
+import org.semanticweb.owlapi.model.OWLDataFactory;
+import org.semanticweb.owlapi.model.OWLOntologyChange;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Entity renderer for the lazy read model: resolves an entity's display label by querying the
@@ -23,6 +32,38 @@ public class VirtuosoEntityRenderer extends AbstractOWLEntityRenderer {
     @Override
     public String render(IRI iri) {
         return LazyLabelCache.getInstance().label(iri);
+    }
+
+    // A label edit (rdfs:label / NCI pref name) lands in the in-RAM ontology before it reaches the
+    // store, so refresh the shared cache from the model and repaint; otherwise a new/renamed entity
+    // shows its bare code in the tree and search results until commit+restart.
+    @Override
+    protected void processChanges(List<? extends OWLOntologyChange> changes) {
+        LazyLabelCache cache = LazyLabelCache.getInstance();
+        Set<IRI> affected = new HashSet<>();
+        for (OWLOntologyChange change : changes) {
+            if (!change.isAxiomChange()) {
+                continue;
+            }
+            OWLAxiom axiom = change.getAxiom();
+            if (!(axiom instanceof OWLAnnotationAssertionAxiom)) {
+                continue;
+            }
+            OWLAnnotationAssertionAxiom aaa = (OWLAnnotationAssertionAxiom) axiom;
+            if (aaa.getSubject() instanceof IRI && cache.isLabelProperty(aaa.getProperty().getIRI())) {
+                affected.add((IRI) aaa.getSubject());
+            }
+        }
+        if (affected.isEmpty()) {
+            return;
+        }
+        OWLModelManager manager = getOWLModelManager();
+        OWLDataFactory df = manager.getOWLDataFactory();
+        for (IRI iri : affected) {
+            if (cache.refreshFromModel(iri, manager.getActiveOntologies())) {
+                fireRenderingChanged(df.getOWLClass(iri));
+            }
+        }
     }
 
     @Override
