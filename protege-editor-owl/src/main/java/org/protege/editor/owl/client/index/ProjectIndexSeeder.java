@@ -23,4 +23,7 @@ public interface ProjectIndexSeeder {
      * @return {@code true} if a fresh index was seeded, {@code false} if one already existed.
      */
     boolean seedIndex(String indexDirId, byte[] indexZip) throws IOException;
+
+    /** Remove the local index for {@code indexDirId} (record + files), e.g. after a server squash reset. */
+    void dropLocalIndex(String indexDirId);
 }

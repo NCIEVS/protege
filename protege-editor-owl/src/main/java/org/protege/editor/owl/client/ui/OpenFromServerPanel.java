@@ -313,6 +313,13 @@ public class OpenFromServerPanel extends JPanel {
         }
         try {
             String indexDirId = pid.get();
+            int marker = ClientPreferences.getInstance().getNoServerRevisionsIndexed(indexDirId);
+            int serverHead = vont.getHeadRevision().getRevisionNumber();
+            // A server head behind the local marker means the project's history was squashed/reset on
+            // the server, so any local index reflects an obsolete revision -- drop it and reseed.
+            if (serverHead < marker) {
+                indexSeeder.dropLocalIndex(indexDirId);
+            }
             if (indexSeeder.hasLocalIndex(indexDirId)) {
                 return; // already seeded/built locally; the changeset catch-up keeps it current
             }
@@ -321,7 +328,7 @@ public class OpenFromServerPanel extends JPanel {
                 return;
             }
             if (indexSeeder.seedIndex(indexDirId, data.getZip())) {
-                ClientPreferences.getInstance().setNoServerRevisionsIndexed(data.getRevision());
+                ClientPreferences.getInstance().setNoServerRevisionsIndexed(indexDirId, data.getRevision());
             }
         }
         catch (Exception e) {
@@ -334,7 +341,7 @@ public class OpenFromServerPanel extends JPanel {
     private void catchUpSearchIndex(LocalHttpClient httpClient, ServerDocument sdoc, ProjectId pid,
             VersionedOWLOntology vont) {
         try {
-            int marker = ClientPreferences.getInstance().getNoServerRevisionsIndexed();
+            int marker = ClientPreferences.getInstance().getNoServerRevisionsIndexed(pid.get());
             int head = vont.getHeadRevision().getRevisionNumber();
             if (marker < head) {
                 ChangeHistory since = httpClient.getLatestChanges(sdoc, DocumentRevision.create(marker), pid);
@@ -342,7 +349,7 @@ public class OpenFromServerPanel extends JPanel {
                     editorKit.getSearchManager().updateIndex(since.getChangesForRevision(rev));
                 }
             }
-            ClientPreferences.getInstance().setNoServerRevisionsIndexed(head);
+            ClientPreferences.getInstance().setNoServerRevisionsIndexed(pid.get(), head);
         }
         catch (Exception e) {
             logger.warn("Could not update the search index from changesets for project {}", pid, e);

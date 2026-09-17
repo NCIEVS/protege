@@ -76,12 +76,14 @@ public class ClientPreferences {
     }
     
     
-    public int getNoServerRevisionsIndexed() {
-        return getPreferences().getInt(SERVER_REVISIONS_PROCESSED, 0);
+    // The last server revision the local search index reflects, kept per project so switching
+    // projects (or a server squash that resets a project's revisions) is tracked independently.
+    public int getNoServerRevisionsIndexed(String projectId) {
+        return getPreferences().getInt(SERVER_REVISIONS_PROCESSED + ":" + projectId, 0);
     }
     
-    public void setNoServerRevisionsIndexed(int no_changes) {
-        getPreferences().putInt(SERVER_REVISIONS_PROCESSED, no_changes);
+    public void setNoServerRevisionsIndexed(String projectId, int no_changes) {
+        getPreferences().putInt(SERVER_REVISIONS_PROCESSED + ":" + projectId, no_changes);
     }
     
     protected static Preferences getPreferences() {
