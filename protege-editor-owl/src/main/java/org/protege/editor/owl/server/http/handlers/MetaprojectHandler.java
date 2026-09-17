@@ -2,17 +2,13 @@ package org.protege.editor.owl.server.http.handlers;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -32,22 +28,12 @@ import org.protege.editor.owl.server.http.exception.ServerException;
 import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
-import org.protege.editor.owl.server.versioning.ChangeHistoryUtils;
-import org.protege.editor.owl.server.versioning.api.ChangeHistory;
-import org.protege.editor.owl.server.versioning.api.HistoryFile;
 import org.protege.editor.owl.server.versioning.api.ServerDocument;
-import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
-import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLOntology;
-import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import gov.nih.nci.owlvirtuoso.ChangesetRdf;
-import gov.nih.nci.owlvirtuoso.RdfChangeSet;
-import gov.nih.nci.owlvirtuoso.SparqlStore;
-import gov.nih.nci.owlvirtuoso.Triple;
 
 import edu.stanford.protege.metaproject.ConfigurationManager;
 import edu.stanford.protege.metaproject.api.AuthToken;
@@ -73,16 +59,15 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	private static final PolicyFactory f = ConfigurationManager.getFactory();
 	private final ServerLayer serverLayer;
 
-	// Load the initial ontology into Virtuoso in batches of this many TRIPLES per SPARQL update.
-	// Virtuoso's SPARQL compiler exhausts memory (SP030) on much larger INSERT DATA statements.
 	private static final String TRIPLESTORE = "triple_store_url";
-	private static final int TRIPLESTORE_BATCH = 500;
 	private boolean update_triple_store = false;
 	private String triple_store_url = "http://localhost:8890/sparql/";
 
 	// Present only when the search plugin is on the server classpath (ServiceLoader); null disables
 	// server-side index building.
 	private final ProjectIndexBuilder indexBuilder;
+
+	private final ServerProjections projections;
 
 	private boolean requiredRestarting = false;
 
@@ -94,6 +79,7 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			triple_store_url = serverLayer.getConfiguration().getProperty(TRIPLESTORE);
 		}
 		this.indexBuilder = loadIndexBuilder();
+		this.projections = new ServerProjections(serverLayer, update_triple_store, triple_store_url, indexBuilder);
 	}
 
 	private static ProjectIndexBuilder loadIndexBuilder() {
@@ -315,61 +301,12 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	private void createProjectSnapshot(ProjectId projectId, SnapShot snapshot, OutputStream os) throws ServerException {
 		try {
 			serverLayer.saveProjectSnapshot(snapshot, projectId, os);
-			loadIntoTripleStore(projectId, snapshot.getOntology());
-			buildProjectIndex(projectId, snapshot.getOntology());
+			projections.loadTripleStore(projectId, snapshot.getOntology(), false);
+			projections.buildIndex(projectId, snapshot.getOntology(), 0);
 		}
 		catch (IOException e) {
 			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to create project snapshot", e);
 		}
-	}
-
-	// Build the base Lucene index for the freshly-loaded ontology, reusing the client's indexer (via
-	// the ServiceLoader-provided builder). At creation the index reflects the base revision (0); a
-	// client seeds from it and replays only changesets after that revision. Non-fatal on failure.
-	private void buildProjectIndex(ProjectId projectId, OWLOntology ont) {
-		buildProjectIndex(projectId, ont, 0);
-	}
-
-	// Build the search index for the given ontology, recording the revision it reflects. The index
-	// directory is cleared first so a rebuild replaces the existing index rather than appending to it.
-	private void buildProjectIndex(ProjectId projectId, OWLOntology ont, int revision) {
-		if (indexBuilder == null) {
-			return;
-		}
-		try {
-			File dir = indexDirectory(projectId);
-			clearDirectory(dir);
-			indexBuilder.buildIndex(ont, dir);
-			writeIndexRevision(projectId, revision);
-			logger.info("Built search index for project {} at {} (revision {})", projectId, dir, revision);
-		}
-		catch (Exception e) {
-			logger.error("Failed to build search index for project " + projectId, e);
-		}
-	}
-
-	// Delete the (flat) contents of a Lucene index directory so a rebuild starts from empty.
-	private static void clearDirectory(File dir) {
-		if (dir.isDirectory()) {
-			File[] files = dir.listFiles();
-			if (files != null) {
-				for (File file : files) {
-					file.delete();
-				}
-			}
-		}
-	}
-
-	// Reconstruct the project's ontology at HEAD from the authoritative snapshot baseline plus the
-	// full change log (the snapshot-plus-replay the old client used to build its in-RAM model). This
-	// is the single source for re-deriving the projections (search index, triple-store graph).
-	private OWLOntology materializeHead(ProjectId projectId) throws Exception {
-		OWLOntology ontology = serverLayer.loadProjectSnapshot(projectId);
-		HistoryFile historyFile = serverLayer.createHistoryFile(projectId);
-		ChangeHistory history = ChangeHistoryUtils.readChanges(historyFile);
-		List<OWLOntologyChange> changes = ChangeHistoryUtils.getOntologyChanges(history, ontology);
-		ontology.getOWLOntologyManager().applyChanges(changes);
-		return ontology;
 	}
 
 	// Rebuild the search index at HEAD from snapshot + replay, so a project whose index is missing or
@@ -377,10 +314,9 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	// with the revision the rebuilt index reflects so the client can seed and replay from there.
 	private void rebuildProjectIndex(ProjectId projectId, OutputStream os) throws ServerException {
 		try {
-			OWLOntology ontology = materializeHead(projectId);
-			int head = ChangeHistoryUtils.readChanges(serverLayer.createHistoryFile(projectId))
-					.getHeadRevision().getRevisionNumber();
-			buildProjectIndex(projectId, ontology, head);
+			OWLOntology ontology = projections.materializeHead(projectId);
+			int head = projections.headRevision(projectId);
+			projections.buildIndex(projectId, ontology, head);
 			ObjectOutputStream oos = new ObjectOutputStream(os);
 			oos.writeObject(String.valueOf(head));
 		}
@@ -394,11 +330,11 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	// its local index and then replay only the changesets after that revision.
 	private void retrieveProjectIndex(ProjectId projectId, OutputStream os) throws ServerException {
 		try {
-			File dir = indexDirectory(projectId);
+			File dir = projections.indexDirectory(projectId);
 			if (!dir.isDirectory()) {
 				throw new ServerException(StatusCodes.NOT_FOUND, "No search index for project " + projectId);
 			}
-			String revision = readIndexRevision(projectId);
+			String revision = projections.readIndexRevision(projectId);
 			byte[] zip = zipDirectory(dir);
 			ObjectOutputStream oos = new ObjectOutputStream(os);
 			oos.writeObject(revision);
@@ -406,29 +342,6 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 		}
 		catch (IOException e) {
 			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to transmit the index", e);
-		}
-	}
-
-	private File indexDirectory(ProjectId projectId) {
-		return new File(serverLayer.getHistoryFilePath(projectId) + "-index");
-	}
-
-	private File indexRevisionFile(ProjectId projectId) {
-		return new File(serverLayer.getHistoryFilePath(projectId) + "-index.revision");
-	}
-
-	private void writeIndexRevision(ProjectId projectId, int revision) throws IOException {
-		try (OutputStream os = new FileOutputStream(indexRevisionFile(projectId))) {
-			os.write(String.valueOf(revision).getBytes(StandardCharsets.UTF_8));
-		}
-	}
-
-	private String readIndexRevision(ProjectId projectId) {
-		try {
-			return new String(Files.readAllBytes(indexRevisionFile(projectId).toPath()), StandardCharsets.UTF_8).trim();
-		}
-		catch (IOException e) {
-			return "0";
 		}
 	}
 
@@ -448,74 +361,6 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			}
 		}
 		return bos.toByteArray();
-	}
-
-	// Load a project's ontology into its Virtuoso named graph in batches, reusing the same
-	// ChangesetRdf -> SparqlStore path as commits so the initial triples match committed ones. The
-	// graph is derived like the commit write path (project namespace + "/" + name). At creation the
-	// history is empty (head 0), so the marker is left unset and the first commit replays from START.
-	private void loadIntoTripleStore(ProjectId projectId, OWLOntology ont) {
-		if (!update_triple_store) {
-			return;
-		}
-		SPARQLRepository repository = null;
-		try {
-			Project project = serverLayer.getConfiguration().getProject(projectId);
-			String graph = project.namespace() + "/" + project.getName().get();
-			repository = new SPARQLRepository(triple_store_url);
-			repository.initialize();
-			SparqlStore store = new SparqlStore(repository, graph);
-			Set<Triple> pending = new HashSet<>();
-			// The ontology declaration (<ont> a owl:Ontology) is the ontology header, not an axiom, so
-			// add it explicitly: the lazy client discovers the ontology IRI from it.
-			if (ont.getOntologyID().getOntologyIRI().isPresent()) {
-				String ontologyIri = ont.getOntologyID().getOntologyIRI().get().toString();
-				pending.add(new Triple("<" + ontologyIri + ">",
-						"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>",
-						"<http://www.w3.org/2002/07/owl#Ontology>"));
-			}
-			long total = 0;
-			for (OWLAxiom axiom : ont.getAxioms()) {
-				pending.addAll(ChangesetRdf.axiomToTriples(axiom));
-				if (pending.size() >= TRIPLESTORE_BATCH) {
-					total += flushTriples(store, pending, projectId);
-					pending = new HashSet<>();
-				}
-			}
-			total += flushTriples(store, pending, projectId);
-			logger.info("Loaded {} triples into triple store graph <{}> for project {}", total, graph, projectId);
-		}
-		catch (Exception e) {
-			logger.error("Failed to load project " + projectId + " into the triple store; "
-					+ "the snapshot is saved and the load can be retried via update snapshot", e);
-		}
-		finally {
-			if (repository != null) {
-				try {
-					repository.shutDown();
-				}
-				catch (Exception e) {
-					logger.warn("Error shutting down triple store connection", e);
-				}
-			}
-		}
-	}
-
-	// Insert one batch of triples as a single small SPARQL update. A failed batch is logged and
-	// skipped so one bad batch does not abort the whole load.
-	private long flushTriples(SparqlStore store, Set<Triple> triples, ProjectId projectId) {
-		if (triples.isEmpty()) {
-			return 0;
-		}
-		try {
-			store.apply(new RdfChangeSet(triples, Collections.<Triple>emptySet()));
-			return triples.size();
-		}
-		catch (Exception e) {
-			logger.error("Triple store batch of " + triples.size() + " triples failed for " + projectId
-					+ "; continuing", e);
-			return 0;
-		}
 	}
 
 	private void retrieveProjectSnapshot(ProjectId projectId, OutputStream os) throws ServerException {

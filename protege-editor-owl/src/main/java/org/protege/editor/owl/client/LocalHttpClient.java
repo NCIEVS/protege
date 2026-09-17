@@ -868,25 +868,21 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		return b;
 	}
 
-	public void squashHistory(SnapShot snapshot, @Nonnull ProjectId projectId) throws ClientRequestException {
+	public void squashHistory(@Nonnull ProjectId projectId) throws ClientRequestException {
 		if (projectId == null) throw new IllegalArgumentException("projectId is null");
-		checkSnapshotChecksumPresent(projectId);
 		ByteArrayOutputStream b = new ByteArrayOutputStream();
 		try {
-			ObjectOutputStream oos = new ObjectOutputStream(b);
-			oos.writeObject(snapshot);
+			// Empty object-stream body: the server computes the squashed snapshot itself (snapshot +
+			// replay) and rebuilds the projections, so the client sends no ontology. The stream header
+			// is still written so the server's ObjectInputStream constructs cleanly.
+			new ObjectOutputStream(b).flush();
 
 			Response response = postWithProjectId(SQUASH,
 				RequestBody.create(ApplicationContentType, b.toByteArray()),
 				projectId,
 				true);
-
-			ObjectInputStream ois = new ObjectInputStream(response.body().byteStream());
-			String snapshotChecksum = (String) ois.readObject();
-			writeSnapshotChecksum(projectId, snapshotChecksum);
-
-			createLocalSnapShot(snapshot.getOntology(), projectId);
-		} catch (IOException | AuthorizationException | ClassNotFoundException e) {
+			response.close();
+		} catch (IOException | AuthorizationException e) {
 			logger.error(e.getMessage(), e);
 			throw new ClientRequestException("Unable to send request to server (see error log for details)", e);
 		}

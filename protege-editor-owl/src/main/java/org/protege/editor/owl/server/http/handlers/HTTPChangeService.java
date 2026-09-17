@@ -27,11 +27,13 @@ import org.protege.editor.owl.server.http.HTTPServer;
 import org.protege.editor.owl.server.http.ServerEndpoints;
 import org.protege.editor.owl.server.http.ServerProperties;
 import org.protege.editor.owl.server.http.exception.ServerException;
+import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
 import org.protege.editor.owl.server.versioning.api.DocumentRevision;
 import org.protege.editor.owl.server.versioning.api.HistoryFile;
+import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 
 import gov.nih.nci.owlvirtuoso.ChangesetRdf;
@@ -61,6 +63,8 @@ public class HTTPChangeService extends BaseRoutingHandler {
 
 	private boolean update_triple_store = false;
 	private String triple_store_url = "http://localhost:8890/sparql/";
+
+	private final ServerProjections projections;
 	
 	
 
@@ -105,6 +109,9 @@ public class HTTPChangeService extends BaseRoutingHandler {
 			update_triple_store = Boolean.parseBoolean((String) uts);
 			triple_store_url = serverLayer.getConfiguration().getProperty(TRIPLESTORE);
 		}
+		java.util.Iterator<ProjectIndexBuilder> it = java.util.ServiceLoader.load(ProjectIndexBuilder.class).iterator();
+		ProjectIndexBuilder indexBuilder = it.hasNext() ? it.next() : null;
+		this.projections = new ServerProjections(serverLayer, update_triple_store, triple_store_url, indexBuilder);
 	}
 
 	@Override
@@ -176,8 +183,7 @@ public class HTTPChangeService extends BaseRoutingHandler {
 			HistoryFile file = (HistoryFile) ois.readObject();
 			retrieveHeadRevision(file, exchange.getOutputStream());
 		} else if (requestPath.equals(ServerEndpoints.SQUASH)) {
-			SnapShot snapshot = (SnapShot) ois.readObject();
-			squashHistory(snapshot, projectId(exchange), exchange.getOutputStream());
+			squashHistory(projectId(exchange), exchange.getOutputStream());
 		}
 	}
 
@@ -299,7 +305,18 @@ public class HTTPChangeService extends BaseRoutingHandler {
 		}
 	}
 
-	private void squashHistory(SnapShot snapShot, ProjectId projectId, OutputStream os) throws IOException {
+	// Server-side squash: the modeler triggers it with no payload; the server computes the new baseline
+	// itself (snapshot + replay), archives the old history/snapshot, writes the new snapshot, then
+	// rebuilds the projections (full Virtuoso reload + search index) at the reset baseline (revision 0).
+	private void squashHistory(ProjectId projectId, OutputStream os) throws IOException {
+		OWLOntology squashed;
+		try {
+			squashed = projections.materializeHead(projectId);
+		}
+		catch (Exception e) {
+			throw new IOException("Failed to materialize project head for squash: " + projectId, e);
+		}
+
 		HistoryFile historyFile = serverLayer.createHistoryFile(projectId);
 		String historyName = historyFile.getName();
 
@@ -334,8 +351,13 @@ public class HTTPChangeService extends BaseRoutingHandler {
 		}
 		Files.createFile(Paths.get(dataDir + historyName));
 
-		serverLayer.saveProjectSnapshot(snapShot, projectId, os);
+		serverLayer.saveProjectSnapshot(new SnapShot(squashed), projectId, os);
 
 		changeService.clearHistoryCacheEntry(historyFile);
+
+		// Re-derive the projections from the new baseline: full Virtuoso reload (clear + load + reset
+		// marker) and search-index rebuild, both at the reset base revision (0).
+		projections.loadTripleStore(projectId, squashed, true);
+		projections.buildIndex(projectId, squashed, 0);
 	}
 }
