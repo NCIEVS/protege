@@ -183,6 +183,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
 			rebuildProjectIndex(projectId, exchange.getOutputStream());
 		}
+		else if (requestPath.equals(ServerEndpoints.PROJECT_EXPORT) && requestMethod.equals(Methods.GET)) {
+			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
+			retrieveProjectExport(projectId, exchange.getOutputStream());
+		}
 		else if (requestPath.equals(ServerEndpoints.METAPROJECT) && requestMethod.equals(Methods.GET)) {
 			retrieveMetaproject(exchange);
 		}
@@ -377,6 +381,20 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 		}
 		catch (OWLOntologyCreationException | IOException e) {
 			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to fetch project snapshot", e);
+		}
+	}
+
+	// Serve the project's ontology at HEAD (snapshot + replay) for a client "export from server": the
+	// lazy client's in-memory ontology holds only fetched fragments, so the full ontology to write out
+	// as an OWL file comes from the server.
+	private void retrieveProjectExport(ProjectId projectId, OutputStream os) throws ServerException {
+		try {
+			OWLOntology ontology = projections.materializeHead(projectId);
+			ObjectOutputStream oos = new ObjectOutputStream(os);
+			oos.writeObject(new SnapShot(ontology));
+		}
+		catch (Exception e) {
+			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR, "Server failed to export the project", e);
 		}
 	}
 

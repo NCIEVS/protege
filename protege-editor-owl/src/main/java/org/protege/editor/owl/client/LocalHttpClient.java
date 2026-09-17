@@ -752,6 +752,26 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		return retrieveDocumentSnapshotFromServerResponse(response, projectId);
 	}
 
+	// Fetch the project's ontology at HEAD from the server for "export from server": the lazy client
+	// holds only fetched fragments locally, so the full ontology to write out comes from the server.
+	public OWLOntology getProjectExport(@Nonnull ProjectId projectId) throws LoginTimeoutException,
+		AuthorizationException, ClientRequestException {
+		if (projectId == null) throw new IllegalArgumentException("projectId is null");
+		Response response = get(PROJECT_EXPORT + "?projectid=" + projectId.get());
+		try {
+			ObjectInputStream ois = new ObjectInputStream(response.body().byteStream());
+			SnapShot snapshot = (SnapShot) ois.readObject();
+			return snapshot.getOntology();
+		} catch (IOException | ClassNotFoundException e) {
+			logger.error(e.getMessage(), e);
+			throw new ClientRequestException("Failed to read exported ontology from server (see error log for details)", e);
+		} finally {
+			if (response != null) {
+				response.body().close();
+			}
+		}
+	}
+
 	private SnapShot retrieveDocumentSnapshotFromServerResponse(Response response, @Nonnull ProjectId projectId)
 		throws ClientRequestException {
 		if (projectId == null) throw new IllegalArgumentException("projectId is null");

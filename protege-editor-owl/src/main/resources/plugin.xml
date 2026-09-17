@@ -1423,6 +1423,15 @@
        	<editorKitId value="OWLEditorKit"/>
        	<class value="org.protege.editor.owl.client.action.ShowHistoryAction"/>
 	</extension>
+
+	<extension id="client.ExportFromServer"
+               name="Export From Server"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+		<name value="Export from server..."/>
+       	<path value="org.protege.editor.owl.client.Server/SlotC-X"/>
+       	<editorKitId value="OWLEditorKit"/>
+       	<class value="org.protege.editor.owl.client.action.ExportFromServerAction"/>
+	</extension>
 	
 	<extension id="client.EnableAutoUpdate"
                name="Auto Update Menu"
