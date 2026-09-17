@@ -4,8 +4,12 @@ import org.protege.editor.owl.model.triplestore.LazyLabelCache;
 import org.protege.editor.owl.model.triplestore.LazyTripleStore;
 import org.semanticweb.owlapi.model.AddAxiom;
 import org.semanticweb.owlapi.model.IRI;
+import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLClass;
+import org.semanticweb.owlapi.model.OWLClassExpression;
 import org.semanticweb.owlapi.model.OWLDataFactory;
+import org.semanticweb.owlapi.model.OWLEquivalentClassesAxiom;
+import org.semanticweb.owlapi.model.OWLObjectIntersectionOf;
 import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyChangeListener;
@@ -260,26 +264,65 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // removed one disappears) without an app restart. Fires nodeChanged only for parents whose cached
     // child set actually changed, so lazy schema/class materialisation -- which re-adds edges already
     // in the cache -- does not cause an event storm. Defined-class (equivalentClass genus) edits are
-    // not tracked here yet; those parents refresh on the next uncached query.
+    // handled alongside, mirroring the parents SPARQL which UNIONs subClassOf and the named genus.
     private void handleOntologyChanges(List<? extends OWLOntologyChange> changes) {
         Set<OWLClass> changedParents = new HashSet<>();
         for (OWLOntologyChange change : changes) {
-            if (!change.isAxiomChange() || !(change.getAxiom() instanceof OWLSubClassOfAxiom)) {
+            if (!change.isAxiomChange()) {
                 continue;
             }
-            OWLSubClassOfAxiom sc = (OWLSubClassOfAxiom) change.getAxiom();
-            if (sc.getSubClass().isAnonymous() || sc.getSuperClass().isAnonymous()) {
-                continue;
+            OWLAxiom axiom = change.getAxiom();
+            boolean add = change instanceof AddAxiom;
+            if (axiom instanceof OWLSubClassOfAxiom) {
+                handleSubClassOf((OWLSubClassOfAxiom) axiom, add, changedParents);
+            } else if (axiom instanceof OWLEquivalentClassesAxiom) {
+                handleEquivalentClasses((OWLEquivalentClassesAxiom) axiom, add, changedParents);
             }
-            OWLClass sub = sc.getSubClass().asOWLClass();
-            OWLClass sup = sc.getSuperClass().asOWLClass();
-            if (updateChildEdge(sub, sup, change instanceof AddAxiom)) {
-                changedParents.add(sup);
-            }
-            parentsCache.remove(sub); // sub's parent set may have changed; re-query on demand
         }
         for (OWLClass parent : changedParents) {
             fireNodeChanged(parent);
+        }
+    }
+
+    private void handleSubClassOf(OWLSubClassOfAxiom sc, boolean add, Set<OWLClass> changedParents) {
+        if (sc.getSubClass().isAnonymous() || sc.getSuperClass().isAnonymous()) {
+            return;
+        }
+        OWLClass sub = sc.getSubClass().asOWLClass();
+        OWLClass sup = sc.getSuperClass().asOWLClass();
+        if (updateChildEdge(sub, sup, add)) {
+            changedParents.add(sup);
+        }
+        parentsCache.remove(sub); // sub's parent set may have changed; re-query on demand
+    }
+
+    // A defined class is EquivalentClasses(named, ObjectIntersectionOf(genus..., restrictions...)); the
+    // named conjuncts of the intersection are its genus parents (exactly what the parents SPARQL reads),
+    // so treat each (definedClass, genus) pair like a subClassOf edge. A plain named-named equivalence
+    // has no intersection, so it only invalidates the equivalents cache.
+    private void handleEquivalentClasses(OWLEquivalentClassesAxiom eq, boolean add,
+                                         Set<OWLClass> changedParents) {
+        Set<OWLClass> definedClasses = new HashSet<>();
+        Set<OWLClass> genusParents = new HashSet<>();
+        for (OWLClassExpression operand : eq.getClassExpressions()) {
+            if (!operand.isAnonymous()) {
+                definedClasses.add(operand.asOWLClass());
+            } else if (operand instanceof OWLObjectIntersectionOf) {
+                for (OWLClassExpression conjunct : ((OWLObjectIntersectionOf) operand).getOperands()) {
+                    if (!conjunct.isAnonymous()) {
+                        genusParents.add(conjunct.asOWLClass());
+                    }
+                }
+            }
+        }
+        for (OWLClass sub : definedClasses) {
+            for (OWLClass sup : genusParents) {
+                if (updateChildEdge(sub, sup, add)) {
+                    changedParents.add(sup);
+                }
+            }
+            parentsCache.remove(sub);   // parent set may have changed; re-query on demand
+            equivalentsCache.remove(sub); // its equivalent set changed too
         }
     }
 
