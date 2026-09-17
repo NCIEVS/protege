@@ -78,6 +78,7 @@ public final class LazyClassLoader {
     private final ValueFactory vf = SimpleValueFactory.getInstance();
     private final Set<String> loaded = Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
     private volatile boolean schemaLoaded = false;
+    private OWLOntology schemaOntology;
 
     private boolean isActive() {
         return store.isConfigured();
@@ -109,9 +110,18 @@ public final class LazyClassLoader {
      * ontology signature. Runs once.
      */
     public synchronized void ensureSchemaLoaded(OWLEditorKit editorKit) {
-        if (!isActive() || schemaLoaded) {
+        if (!isActive()) {
             return;
         }
+        OWLOntology active = editorKit.getOWLModelManager().getActiveOntology();
+        if (schemaLoaded && active == schemaOntology) {
+            return;
+        }
+        // A new active ontology (project (re)open, e.g. after a squash, or a project switch) starts
+        // empty, so the schema and per-class caches from the previous ontology no longer apply --
+        // reload the schema into this ontology.
+        schemaLoaded = false;
+        loaded.clear();
         try {
             Set<String> seeds = store.selectValues(LazyTripleStore.PREFIXES
                     + "SELECT DISTINCT ?s WHERE { GRAPH <" + store.graph() + "> { ?s a ?t . "
@@ -120,6 +130,7 @@ public final class LazyClassLoader {
             int count = materialise(fetchClosure(seeds), editorKit);
             declareStandardAnnotationProperties(editorKit);
             schemaLoaded = true;
+            schemaOntology = active;
             logger.info("Lazily loaded schema: {} axioms from {} entities", count, seeds.size());
         } catch (Exception e) {
             logger.error("Failed to lazily load schema", e);
