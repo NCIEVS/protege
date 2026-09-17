@@ -14,6 +14,8 @@ import javax.swing.table.AbstractTableModel;
 
 import org.protege.editor.core.ProtegeApplication;
 import org.protege.editor.core.util.Version;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
@@ -31,6 +33,8 @@ public class PluginInfoTableModel extends AbstractTableModel {
 	 * 
 	 */
 	private static final long serialVersionUID = 1L;
+
+	private static final Logger logger = LoggerFactory.getLogger(PluginInfoTableModel.class);
 	
 	private List<PluginVersion> bundles;
     public enum Columns {
@@ -71,7 +75,7 @@ public class PluginInfoTableModel extends AbstractTableModel {
             case VERSION:
                 return v == null ? "" : "" + v.getMajor() + "." + v.getMinor() + "." + v.getMicro();
             case QUALIFIER:
-                return v.getQualifier();
+                return v == null ? "" : v.getQualifier();
             default:
                 throw new RuntimeException("Programmer error - missed a case");
         }
@@ -101,15 +105,30 @@ public class PluginInfoTableModel extends AbstractTableModel {
 					try (JarInputStream is = new JarInputStream(new FileInputStream(f))) {
 			            Manifest mf = is.getManifest();
 			            if(mf == null) {
-			            	throw new RuntimeException("Programmer error - missed menifest file in jar");
+			            	logger.warn("Skipping plugin jar without a manifest: {}", f.getName());
+			            	continue;
 			            }
 			            Attributes attributes = mf.getMainAttributes();
 			            String name = attributes.getValue("Bundle-Name");
-			            
+			            if (name == null) {
+			            	name = attributes.getValue("Bundle-SymbolicName");
+			            }
+			            if (name == null) {
+			            	name = f.getName();
+			            }
 			            String versionString = attributes.getValue("Bundle-Version");
-			            list.add(new PluginVersion(name,new Version(versionString)));
+			            Version version = null;
+			            if (versionString != null) {
+			            	try {
+			            		version = new Version(versionString);
+			            	} catch (Exception ve) {
+			            		logger.warn("Plugin {} has an unparseable Bundle-Version '{}'", f.getName(), versionString);
+			            	}
+			            }
+			            list.add(new PluginVersion(name, version));
 			        } catch (Exception e) {
-			        	throw new RuntimeException("Programmer error - " + e.getMessage());
+			        	// A single malformed plugin jar must not break the whole plugins panel.
+			        	logger.warn("Skipping plugin jar {} (could not read manifest)", f.getName(), e);
 			        }
 				}
 
