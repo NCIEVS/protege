@@ -32,10 +32,14 @@ import org.protege.editor.owl.server.http.exception.ServerException;
 import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
+import org.protege.editor.owl.server.versioning.ChangeHistoryUtils;
+import org.protege.editor.owl.server.versioning.api.ChangeHistory;
+import org.protege.editor.owl.server.versioning.api.HistoryFile;
 import org.protege.editor.owl.server.versioning.api.ServerDocument;
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLOntology;
+import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyCreationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -189,6 +193,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
 			retrieveProjectIndex(projectId, exchange.getOutputStream());
 		}
+		else if (requestPath.equals(ServerEndpoints.PROJECT_INDEX) && requestMethod.equals(Methods.POST)) {
+			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
+			rebuildProjectIndex(projectId, exchange.getOutputStream());
+		}
 		else if (requestPath.equals(ServerEndpoints.METAPROJECT) && requestMethod.equals(Methods.GET)) {
 			retrieveMetaproject(exchange);
 		}
@@ -319,17 +327,66 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	// the ServiceLoader-provided builder). At creation the index reflects the base revision (0); a
 	// client seeds from it and replays only changesets after that revision. Non-fatal on failure.
 	private void buildProjectIndex(ProjectId projectId, OWLOntology ont) {
+		buildProjectIndex(projectId, ont, 0);
+	}
+
+	// Build the search index for the given ontology, recording the revision it reflects. The index
+	// directory is cleared first so a rebuild replaces the existing index rather than appending to it.
+	private void buildProjectIndex(ProjectId projectId, OWLOntology ont, int revision) {
 		if (indexBuilder == null) {
 			return;
 		}
 		try {
 			File dir = indexDirectory(projectId);
+			clearDirectory(dir);
 			indexBuilder.buildIndex(ont, dir);
-			writeIndexRevision(projectId, 0);
-			logger.info("Built search index for project {} at {}", projectId, dir);
+			writeIndexRevision(projectId, revision);
+			logger.info("Built search index for project {} at {} (revision {})", projectId, dir, revision);
 		}
 		catch (Exception e) {
 			logger.error("Failed to build search index for project " + projectId, e);
+		}
+	}
+
+	// Delete the (flat) contents of a Lucene index directory so a rebuild starts from empty.
+	private static void clearDirectory(File dir) {
+		if (dir.isDirectory()) {
+			File[] files = dir.listFiles();
+			if (files != null) {
+				for (File file : files) {
+					file.delete();
+				}
+			}
+		}
+	}
+
+	// Reconstruct the project's ontology at HEAD from the authoritative snapshot baseline plus the
+	// full change log (the snapshot-plus-replay the old client used to build its in-RAM model). This
+	// is the single source for re-deriving the projections (search index, triple-store graph).
+	private OWLOntology materializeHead(ProjectId projectId) throws Exception {
+		OWLOntology ontology = serverLayer.loadProjectSnapshot(projectId);
+		HistoryFile historyFile = serverLayer.createHistoryFile(projectId);
+		ChangeHistory history = ChangeHistoryUtils.readChanges(historyFile);
+		List<OWLOntologyChange> changes = ChangeHistoryUtils.getOntologyChanges(history, ontology);
+		ontology.getOWLOntologyManager().applyChanges(changes);
+		return ontology;
+	}
+
+	// Rebuild the search index at HEAD from snapshot + replay, so a project whose index is missing or
+	// stale (e.g. a client "reindex") gets a complete index reflecting the current revision. Responds
+	// with the revision the rebuilt index reflects so the client can seed and replay from there.
+	private void rebuildProjectIndex(ProjectId projectId, OutputStream os) throws ServerException {
+		try {
+			OWLOntology ontology = materializeHead(projectId);
+			int head = ChangeHistoryUtils.readChanges(serverLayer.createHistoryFile(projectId))
+					.getHeadRevision().getRevisionNumber();
+			buildProjectIndex(projectId, ontology, head);
+			ObjectOutputStream oos = new ObjectOutputStream(os);
+			oos.writeObject(String.valueOf(head));
+		}
+		catch (Exception e) {
+			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR,
+					"Server failed to rebuild the search index for " + projectId, e);
 		}
 	}
 

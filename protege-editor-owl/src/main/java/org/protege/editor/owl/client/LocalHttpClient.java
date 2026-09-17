@@ -470,6 +470,28 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		}
 	}
 
+	// Ask the server to rebuild this project's search index at HEAD (snapshot + replay) and return the
+	// revision the rebuilt index reflects, or -1 on failure. Used by the "reindex" action so the index
+	// is re-derived server-side rather than from the lazy client's partial in-memory ontology.
+	public int rebuildProjectIndex(@Nonnull ProjectId projectId) {
+		if (projectId == null) throw new IllegalArgumentException("projectId is null");
+		Response response = null;
+		try {
+			response = post(PROJECT_INDEX + "?projectid=" + projectId.get(),
+					RequestBody.create(ApplicationContentType, new byte[0]), true);
+			ObjectInputStream ois = new ObjectInputStream(response.body().byteStream());
+			String revision = (String) ois.readObject();
+			return Integer.parseInt(revision);
+		} catch (Exception e) {
+			logger.warn("Could not rebuild the server search index for project {}", projectId, e);
+			return -1;
+		} finally {
+			if (response != null) {
+				response.body().close();
+			}
+		}
+	}
+
 	@Override
 	public ChangeHistory commit(@Nonnull ProjectId projectId, CommitBundle commitBundle)
 		throws AuthorizationException, ClientRequestException {
