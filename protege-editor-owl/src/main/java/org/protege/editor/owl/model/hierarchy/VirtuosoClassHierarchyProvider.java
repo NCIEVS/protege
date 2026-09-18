@@ -125,7 +125,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         return PREFIXES
               + "SELECT DISTINCT ?c WHERE { GRAPH <" + store.graph() + "> { "
               + "  ?c rdf:type owl:Class . "
-              + "  FILTER(isIRI(?c) && ?c != owl:Thing && ?c != owl:Nothing) "
+              + "  FILTER(isIRI(?c) && ?c != owl:Thing && ?c != owl:Nothing && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
               + "  FILTER NOT EXISTS { ?c rdfs:subClassOf ?sup . FILTER(isIRI(?sup) && ?sup != owl:Thing) } "
               + "  FILTER NOT EXISTS { ?c owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . "
               + "                      ?l rdf:rest*/rdf:first ?g . FILTER(isIRI(?g)) } "
@@ -167,7 +167,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
               + "  { ?c rdfs:subClassOf <" + parentIri + "> } "
               + "  UNION "
               + "  { ?c owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first <" + parentIri + "> } "
-              + "  FILTER(isIRI(?c) && ?c != <" + parentIri + ">) "
+              + "  FILTER(isIRI(?c) && ?c != <" + parentIri + "> && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
               + "} }";
     }
 
@@ -184,7 +184,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
               + "  { ?gc rdfs:subClassOf ?c } "
               + "  UNION "
               + "  { ?gc owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?c } "
-              + "  FILTER(isIRI(?gc) && ?gc != ?c) "
+              + "  FILTER(isIRI(?gc) && ?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) "
               + "} }";
     }
 
@@ -200,10 +200,10 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         final String c = object.getIRI().toString();
         final String query = PREFIXES
               + "SELECT DISTINCT ?p WHERE { GRAPH <" + store.graph() + "> { "
-              + "  { <" + c + "> rdfs:subClassOf ?p . FILTER(isIRI(?p) && ?p != owl:Thing) } "
+              + "  { <" + c + "> rdfs:subClassOf ?p . FILTER(isIRI(?p) && ?p != owl:Thing && !STRSTARTS(STR(?p), \"urn:skolem:\")) } "
               + "  UNION "
               + "  { <" + c + "> owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . "
-              + "    ?l rdf:rest*/rdf:first ?p . FILTER(isIRI(?p)) } "
+              + "    ?l rdf:rest*/rdf:first ?p . FILTER(isIRI(?p) && !STRSTARTS(STR(?p), \"urn:skolem:\")) } "
               + "} }";
         Set<OWLClass> parents = runClassQuery(query, "p");
         // No named parent -> it hangs directly under the root (an orphan), same as the asserted provider.
@@ -228,7 +228,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         final String query = PREFIXES
               + "SELECT DISTINCT ?e WHERE { GRAPH <" + store.graph() + "> { "
               + "  { <" + c + "> owl:equivalentClass ?e } UNION { ?e owl:equivalentClass <" + c + "> } "
-              + "  FILTER(isIRI(?e) && ?e != <" + c + ">) "
+              + "  FILTER(isIRI(?e) && ?e != <" + c + "> && !STRSTARTS(STR(?e), \"urn:skolem:\")) "
               + "} }";
         return runClassQuery(query, "e");
     }
