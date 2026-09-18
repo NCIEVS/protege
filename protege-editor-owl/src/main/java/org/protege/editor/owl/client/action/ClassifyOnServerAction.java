@@ -6,6 +6,9 @@ import javax.swing.SwingUtilities;
 
 import org.protege.editor.owl.client.ClientSession;
 import org.protege.editor.owl.client.LocalHttpClient;
+import org.protege.editor.owl.model.hierarchy.InferredVirtuosoClassHierarchyProvider;
+import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProvider;
+import org.semanticweb.owlapi.model.OWLClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +47,7 @@ public class ClassifyOnServerAction extends AbstractClientAction {
     private void reportStatus(String status) {
         switch (status) {
             case "classified":
+                refreshInferredTree();
                 showInfoDialog("Classify on server",
                         "Classification complete. The inferred hierarchy graph was rebuilt on the server.");
                 break;
@@ -62,6 +66,16 @@ public class ClassifyOnServerAction extends AbstractClientAction {
             default:
                 logger.warn("Server classification returned status: {}", status);
                 showErrorDialog("Classify on server", "Classification failed on the server.", null);
+        }
+    }
+
+    // Refresh the inferred navigation tree so it shows the just-computed hierarchy (only meaningful
+    // under the lazy read model, where the inferred view is backed by the /inferred graph).
+    private void refreshInferredTree() {
+        OWLObjectHierarchyProvider<OWLClass> provider =
+                getOWLModelManager().getOWLHierarchyManager().getInferredOWLClassHierarchyProvider();
+        if (provider instanceof InferredVirtuosoClassHierarchyProvider) {
+            ((InferredVirtuosoClassHierarchyProvider) provider).refresh();
         }
     }
 }

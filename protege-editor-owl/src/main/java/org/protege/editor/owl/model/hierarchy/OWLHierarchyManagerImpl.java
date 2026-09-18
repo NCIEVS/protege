@@ -26,7 +26,7 @@ public class OWLHierarchyManagerImpl implements OWLHierarchyManager {
 
     private OWLObjectHierarchyProvider<OWLClass> assertedClassHierarchyProvider;
 
-    private InferredOWLClassHierarchyProvider inferredClassHierarchyProvider;
+    private OWLObjectHierarchyProvider<OWLClass> inferredClassHierarchyProvider;
 
     private OWLObjectHierarchyProvider<OWLObjectProperty> assertedObjectPropertyHierarchyProvider;
 
@@ -72,7 +72,15 @@ public class OWLHierarchyManagerImpl implements OWLHierarchyManager {
 
     public OWLObjectHierarchyProvider<OWLClass> getInferredOWLClassHierarchyProvider() {
         if (inferredClassHierarchyProvider == null) {
-            inferredClassHierarchyProvider = new InferredOWLClassHierarchyProvider(mngr, mngr.getOWLOntologyManager());
+            if (Boolean.getBoolean("nci.lazyHierarchy")) {
+                // Inferred hierarchy = the server-classified /inferred graph, read lazily like the
+                // asserted tree, rather than the in-client reasoner's in-RAM taxonomy.
+                inferredClassHierarchyProvider =
+                        new InferredVirtuosoClassHierarchyProvider(mngr.getOWLOntologyManager());
+            } else {
+                inferredClassHierarchyProvider =
+                        new InferredOWLClassHierarchyProvider(mngr, mngr.getOWLOntologyManager());
+            }
             this.inferredClassHierarchyProvider.setOntologies(mngr.getActiveOntologies());
         }
         return inferredClassHierarchyProvider;
