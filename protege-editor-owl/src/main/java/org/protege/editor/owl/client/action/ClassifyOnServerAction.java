@@ -6,6 +6,7 @@ import javax.swing.SwingUtilities;
 
 import org.protege.editor.owl.client.ClientSession;
 import org.protege.editor.owl.client.LocalHttpClient;
+import org.protege.editor.owl.model.event.EventType;
 import org.protege.editor.owl.model.hierarchy.InferredVirtuosoClassHierarchyProvider;
 import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProvider;
 import org.semanticweb.owlapi.model.OWLClass;
@@ -48,6 +49,9 @@ public class ClassifyOnServerAction extends AbstractClientAction {
         switch (status) {
             case "classified":
                 refreshInferredTree();
+                // Refresh the "Curator Classification results" panel (and other classification views),
+                // which key off this event; the client itself did not run a reasoner.
+                getOWLModelManager().fireEvent(EventType.ONTOLOGY_CLASSIFIED);
                 showInfoDialog("Classify on server",
                         "Classification complete. The inferred hierarchy graph was rebuilt on the server.");
                 break;
