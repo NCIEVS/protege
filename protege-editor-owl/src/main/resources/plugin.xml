@@ -1432,6 +1432,15 @@
        	<editorKitId value="OWLEditorKit"/>
        	<class value="org.protege.editor.owl.client.action.ExportFromServerAction"/>
 	</extension>
+
+	<extension id="client.ClassifyOnServer"
+               name="Classify On Server"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+		<name value="Classify on server..."/>
+       	<path value="org.protege.editor.owl.client.Server/SlotC-Y"/>
+       	<editorKitId value="OWLEditorKit"/>
+       	<class value="org.protege.editor.owl.client.action.ClassifyOnServerAction"/>
+	</extension>
 	
 	<extension id="client.EnableAutoUpdate"
                name="Auto Update Menu"
