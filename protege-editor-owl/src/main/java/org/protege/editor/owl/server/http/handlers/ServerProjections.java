@@ -150,8 +150,11 @@ class ServerProjections {
 						"<http://www.w3.org/2002/07/owl#Ontology>"));
 			}
 			long total = 0;
+			// One reusable renderer for the whole load: rendering each axiom in its own fresh manager +
+			// ontology (the old ChangesetRdf.axiomToTriples per call) dominated a full-Thesaurus load.
+			ChangesetRdf.Renderer renderer = new ChangesetRdf.Renderer();
 			for (OWLAxiom axiom : ont.getAxioms()) {
-				pending.addAll(ChangesetRdf.axiomToTriples(axiom));
+				pending.addAll(renderer.render(axiom));
 				if (pending.size() >= TRIPLESTORE_BATCH) {
 					total += flushTriples(store, pending, projectId);
 					pending = new HashSet<>();
