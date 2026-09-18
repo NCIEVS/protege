@@ -184,20 +184,38 @@ public final class LazyClassLoader {
     }
 
     /**
-     * An entity's own triples plus the blank-node/skolem closure of its anonymous expressions,
-     * fetched in a SINGLE query so blank-node identity is preserved (rdf4j relabels blank nodes per
-     * result, so a multi-query walk cannot re-address them). The structural path is followed only
-     * from a subClassOf/equivalentClass entry and only anonymous subjects are kept, so named
-     * neighbours (e.g. role fillers) are referenced but never expanded.
+     * An entity's own triples plus the skolem-node closure of its anonymous expressions. Our loaded
+     * graph skolemises all anonymous nodes to stable {@code urn:skolem:} IRIs (no real blank nodes),
+     * so the structure is walked level-by-level with fast VALUES-anchored queries rather than one
+     * unbounded property path -- which Virtuoso cannot evaluate on the full graph (it returns an
+     * "ANYTIME timeout"). Only skolem nodes are expanded, so named neighbours (role fillers, parents)
+     * are referenced but never dragged in. Blank-node identity is not a concern here because the nodes
+     * are stable IRIs; {@code deskolemise} keys on the IRI string, so a multi-query walk re-addresses
+     * them consistently.
      */
     private Model closure(String iri) {
-        return store.construct(LazyTripleStore.PREFIXES
-                + "CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + store.graph() + "> { "
-                + "{ BIND(<" + iri + "> AS ?s) <" + iri + "> ?p ?o } UNION { "
-                + "<" + iri + "> (rdfs:subClassOf|owl:equivalentClass) ?entry . "
-                + "?entry " + STRUCTURAL_PATH + " ?s . "
-                + "FILTER(isBlank(?s) || STRSTARTS(STR(?s), \"" + SKOLEM_PREFIX + "\")) "
-                + "?s ?p ?o } } }");
+        Model total = new LinkedHashModel();
+        total.addAll(directTriples(Collections.singletonList(iri)));
+        Set<String> seen = new HashSet<>();
+        Set<String> frontier = newSkolemObjects(total, seen);
+        while (!frontier.isEmpty()) {
+            Model level = directTriples(frontier);
+            total.addAll(level);
+            frontier = newSkolemObjects(level, seen);
+        }
+        return total;
+    }
+
+    // The not-yet-seen skolem-IRI objects in a model (recorded in {@code seen}) -- the next BFS frontier.
+    private Set<String> newSkolemObjects(Model model, Set<String> seen) {
+        Set<String> next = new HashSet<>();
+        for (Statement st : model) {
+            Value o = st.getObject();
+            if (o instanceof Resource && o.stringValue().startsWith(SKOLEM_PREFIX) && seen.add(o.stringValue())) {
+                next.add(o.stringValue());
+            }
+        }
+        return next;
     }
 
     // Materialise the schema without the per-seed structural-path loop (which blocked open ~24s):
