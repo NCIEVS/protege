@@ -3,6 +3,7 @@ package org.protege.editor.owl.server.versioning;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
 import org.protege.editor.owl.server.versioning.api.DocumentRevision;
 import org.protege.editor.owl.server.versioning.api.RevisionMetadata;
+import org.protege.editor.owl.server.http.messages.History;
 
 import org.semanticweb.binaryowl.BinaryOWLMetadata;
 import org.semanticweb.binaryowl.BinaryOWLOntologyChangeLog;
@@ -197,6 +198,10 @@ public class ChangeHistoryImpl implements ChangeHistory {
         metadataRecord.setStringAttribute(RevisionMetadata.AUTHOR_EMAIL, metadata.getAuthorEmail());
         metadataRecord.setLongAttribute(RevisionMetadata.CHANGE_DATE, metadata.getDate().getTime());
         metadataRecord.setStringAttribute(RevisionMetadata.CHANGE_COMMENT, metadata.getComment());
+        if (!metadata.getEvsRecords().isEmpty()) {
+            metadataRecord.setStringAttribute(RevisionMetadata.EVS_RECORDS,
+                    History.encodeEvsList(metadata.getEvsRecords()));
+        }
         return metadataRecord;
     }
 
@@ -206,7 +211,9 @@ public class ChangeHistoryImpl implements ChangeHistory {
         String authorEmail = metadata.getStringAttribute(RevisionMetadata.AUTHOR_EMAIL, "");
         Date changeDate = new Date(metadata.getLongAttribute(RevisionMetadata.CHANGE_DATE, 0L));
         String comment = metadata.getStringAttribute(RevisionMetadata.CHANGE_COMMENT, "");
-        return new RevisionMetadata(authorId, authorName, authorEmail, changeDate, comment);
+        List<History> evsRecords = History.decodeEvsList(
+                metadata.getStringAttribute(RevisionMetadata.EVS_RECORDS, ""));
+        return new RevisionMetadata(authorId, authorName, authorEmail, changeDate, comment, evsRecords);
     }
 
     @Override

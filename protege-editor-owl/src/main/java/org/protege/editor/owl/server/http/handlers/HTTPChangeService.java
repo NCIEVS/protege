@@ -2,9 +2,12 @@ package org.protege.editor.owl.server.http.handlers;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Paths;
@@ -27,9 +30,11 @@ import org.protege.editor.owl.server.http.HTTPServer;
 import org.protege.editor.owl.server.http.ServerEndpoints;
 import org.protege.editor.owl.server.http.ServerProperties;
 import org.protege.editor.owl.server.http.exception.ServerException;
+import org.protege.editor.owl.server.http.messages.History;
 import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.security.LoginTimeoutException;
 import org.protege.editor.owl.server.util.SnapShot;
+import org.protege.editor.owl.server.versioning.Commit;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
 import org.protege.editor.owl.server.versioning.api.DocumentRevision;
 import org.protege.editor.owl.server.versioning.api.HistoryFile;
@@ -204,6 +209,7 @@ public class HTTPChangeService extends BaseRoutingHandler {
 			throws ServerException, UnknownProjectIdException {
 		try {
 			ChangeHistory hist = serverLayer.commit(authToken, projectId, bundle);
+			recordEvsHistory(projectId, bundle);
 			ObjectOutputStream oos = new ObjectOutputStream(os);
 			oos.writeObject(hist);
 			if (this.update_triple_store) {
@@ -260,6 +266,36 @@ public class HTTPChangeService extends BaseRoutingHandler {
 					+ "; the changeset log is authoritative and the next commit will replay from the marker", e);
 		} finally {
 			repository.shutDown();
+		}
+	}
+
+	// Append the commit's EVS/audit descriptors to the project's evs_history files in the same request
+	// that committed the changeset (Decision #4), replacing the old separate post-commit call. The
+	// descriptors are also persisted in the change log metadata, so a file-append failure is logged but
+	// never fails the commit -- the log is authoritative and the projection can be rebuilt.
+	private void recordEvsHistory(ProjectId projectId, CommitBundle bundle) {
+		List<History> records = new ArrayList<>();
+		for (Commit commit : bundle.getCommits()) {
+			records.addAll(commit.getMetadata().getEvsRecords());
+		}
+		if (records.isEmpty()) {
+			return;
+		}
+		try {
+			String directory = serverLayer.getConfiguration().getServerRoot() + "/" + projectId.get() + File.separator;
+			String[] histFileNames = {
+					directory + serverLayer.getConfiguration().getProperty(ServerProperties.EVS_HISTORY_FILE),
+					directory + serverLayer.getConfiguration().getProperty(ServerProperties.CUR_EVS_HISTORY_FILE)};
+			for (String filename : histFileNames) {
+				try (PrintWriter pw = new PrintWriter(new BufferedWriter(new FileWriter(filename, true)))) {
+					for (History h : records) {
+						pw.println(h.toRecord(History.HistoryType.EVS));
+					}
+				}
+			}
+		} catch (IOException e) {
+			logger.error("Failed to record EVS history for " + projectId
+					+ "; it is persisted in the change log and can be rebuilt", e);
 		}
 	}
 

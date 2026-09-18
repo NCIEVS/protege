@@ -3,6 +3,8 @@ package org.protege.editor.owl.server.http.messages;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 public class History implements Serializable {
 	/**
@@ -137,6 +139,33 @@ public class History implements Serializable {
 					reference;
 		}
 
+	}
+
+	// Round-trippable encoding for carrying a revision's EVS records inside the change-log metadata
+	// (one tab-delimited EVS record per line), so the log is the single source for replaying them.
+	public static String encodeEvsList(List<History> records) {
+		StringBuilder sb = new StringBuilder();
+		for (History h : records) {
+			if (sb.length() > 0) {
+				sb.append('\n');
+			}
+			sb.append(h.toRecord(HistoryType.EVS));
+		}
+		return sb.toString();
+	}
+
+	public static List<History> decodeEvsList(String encoded) {
+		List<History> result = new ArrayList<>();
+		if (encoded == null || encoded.isEmpty()) {
+			return result;
+		}
+		for (String line : encoded.split("\n")) {
+			if (line.isEmpty()) {
+				continue;
+			}
+			result.add(createEvsHist(line.split("\t")));
+		}
+		return result;
 	}
 
 }

@@ -107,10 +107,19 @@ public class ClientUtils {
      * @return A commit object
      */
     public static Commit createCommit(Client author, String comment, List<OWLOntologyChange> changes) {
+        return createCommit(author, comment, changes, java.util.Collections.emptyList());
+    }
+
+    /**
+     * Create a commit that also carries EVS/audit descriptors, so the server records them in the same
+     * transaction as the changeset (rather than a separate post-commit call) and persists them in the log.
+     */
+    public static Commit createCommit(Client author, String comment, List<OWLOntologyChange> changes,
+            List<org.protege.editor.owl.server.http.messages.History> evsRecords) {
         RevisionMetadata metadata = new RevisionMetadata(
                 author.getUserInfo().getId(),
                 author.getUserInfo().getName(),
-                author.getUserInfo().getEmailAddress(), comment);
+                author.getUserInfo().getEmailAddress(), new java.util.Date(), comment, evsRecords);
         return new Commit(metadata, changes);
     }
 
