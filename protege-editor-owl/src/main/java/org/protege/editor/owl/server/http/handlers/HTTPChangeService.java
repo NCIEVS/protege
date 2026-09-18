@@ -116,7 +116,8 @@ public class HTTPChangeService extends BaseRoutingHandler {
 		}
 		java.util.Iterator<ProjectIndexBuilder> it = java.util.ServiceLoader.load(ProjectIndexBuilder.class).iterator();
 		ProjectIndexBuilder indexBuilder = it.hasNext() ? it.next() : null;
-		this.projections = new ServerProjections(serverLayer, update_triple_store, triple_store_url, indexBuilder);
+		// Commits do not classify, so no OntologyClassifier is needed on this projections instance.
+		this.projections = new ServerProjections(serverLayer, update_triple_store, triple_store_url, indexBuilder, null);
 	}
 
 	@Override

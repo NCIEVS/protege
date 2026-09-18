@@ -492,6 +492,28 @@ public class LocalHttpClient implements Client, ClientSessionListener {
 		}
 	}
 
+	// Ask the server to classify this project at HEAD (snapshot + replay) via the curator and
+	// materialize the inferred hierarchy into the project's /inferred graph. Returns the server's
+	// status string ("classified", "rejected", "no-classifier", ...), or "error" on failure. The
+	// asserted graph is never touched.
+	public String classifyProject(@Nonnull ProjectId projectId) {
+		if (projectId == null) throw new IllegalArgumentException("projectId is null");
+		Response response = null;
+		try {
+			response = post(PROJECT_CLASSIFY + "?projectid=" + projectId.get(),
+					RequestBody.create(ApplicationContentType, new byte[0]), true);
+			ObjectInputStream ois = new ObjectInputStream(response.body().byteStream());
+			return (String) ois.readObject();
+		} catch (Exception e) {
+			logger.warn("Could not classify project {} on the server", projectId, e);
+			return "error";
+		} finally {
+			if (response != null) {
+				response.body().close();
+			}
+		}
+	}
+
 	@Override
 	public ChangeHistory commit(@Nonnull ProjectId projectId, CommitBundle commitBundle)
 		throws AuthorizationException, ClientRequestException {

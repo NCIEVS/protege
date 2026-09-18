@@ -21,6 +21,7 @@ import edu.stanford.protege.metaproject.impl.ServerStatus;
 import org.protege.editor.owl.server.api.ServerLayer;
 import org.protege.editor.owl.server.api.exception.AuthorizationException;
 import org.protege.editor.owl.server.api.exception.ServerServiceException;
+import org.protege.editor.owl.server.classify.OntologyClassifier;
 import org.protege.editor.owl.server.http.HTTPServer;
 import org.protege.editor.owl.server.http.ServerEndpoints;
 import org.protege.editor.owl.server.http.ServerProperties;
@@ -67,6 +68,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	// server-side index building.
 	private final ProjectIndexBuilder indexBuilder;
 
+	// Present only when the curator plugin is on the server classpath (ServiceLoader); null disables
+	// server-side classification.
+	private final OntologyClassifier classifier;
+
 	private final ServerProjections projections;
 
 	private boolean requiredRestarting = false;
@@ -79,7 +84,8 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			triple_store_url = serverLayer.getConfiguration().getProperty(TRIPLESTORE);
 		}
 		this.indexBuilder = loadIndexBuilder();
-		this.projections = new ServerProjections(serverLayer, update_triple_store, triple_store_url, indexBuilder);
+		this.classifier = loadClassifier();
+		this.projections = new ServerProjections(serverLayer, update_triple_store, triple_store_url, indexBuilder, classifier);
 	}
 
 	private static ProjectIndexBuilder loadIndexBuilder() {
@@ -90,6 +96,17 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 			return builder;
 		}
 		logger.info("No ProjectIndexBuilder on the classpath; server-side search indexing is disabled");
+		return null;
+	}
+
+	private static OntologyClassifier loadClassifier() {
+		Iterator<OntologyClassifier> it = ServiceLoader.load(OntologyClassifier.class).iterator();
+		if (it.hasNext()) {
+			OntologyClassifier c = it.next();
+			logger.info("Server-side ontology classifier: {}", c.getClass().getName());
+			return c;
+		}
+		logger.info("No OntologyClassifier on the classpath; server-side classification is disabled");
 		return null;
 	}
 
@@ -186,6 +203,10 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 		else if (requestPath.equals(ServerEndpoints.PROJECT_EXPORT) && requestMethod.equals(Methods.GET)) {
 			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
 			retrieveProjectExport(projectId, exchange.getOutputStream());
+		}
+		else if (requestPath.equals(ServerEndpoints.PROJECT_CLASSIFY) && requestMethod.equals(Methods.POST)) {
+			ProjectId projectId = f.getProjectId(getQueryParameter(exchange, "projectid"));
+			classifyProject(projectId, exchange.getOutputStream());
 		}
 		else if (requestPath.equals(ServerEndpoints.METAPROJECT) && requestMethod.equals(Methods.GET)) {
 			retrieveMetaproject(exchange);
@@ -313,11 +334,28 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 		}
 	}
 
+	// Classify the project at HEAD (snapshot + replay) via the curator and materialize the inferred
+	// hierarchy into the project's separate /inferred graph. Responds with a short status string
+	// ("classified", "rejected", "no-classifier", "triplestore-disabled", "error"). The asserted graph
+	// is never touched; the inferred graph reflects this classify until the next one.
+	private void classifyProject(ProjectId projectId, OutputStream os) throws ServerException {
+		try {
+			OWLOntology ontology = projections.materializeHead(projectId);
+			int head = projections.headRevision(projectId);
+			String status = projections.classify(projectId, ontology, head);
+			ObjectOutputStream oos = new ObjectOutputStream(os);
+			oos.writeObject(status);
+		}
+		catch (Exception e) {
+			throw new ServerException(StatusCodes.INTERNAL_SERVER_ERROR,
+					"Server failed to classify " + projectId, e);
+		}
+	}
+
 	// Rebuild the search index at HEAD from snapshot + replay, so a project whose index is missing or
 	// stale (e.g. a client "reindex") gets a complete index reflecting the current revision. Responds
 	// with the revision the rebuilt index reflects so the client can seed and replay from there.
-	private void rebuildProjectIndex(ProjectId projectId, OutputStream os) throws ServerException {
-		try {
+	private void rebuildProjectIndex(ProjectId projectId, OutputStream os) throws ServerException {		try {
 			OWLOntology ontology = projections.materializeHead(projectId);
 			int head = projections.headRevision(projectId);
 			projections.buildIndex(projectId, ontology, head);

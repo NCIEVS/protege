@@ -219,6 +219,7 @@ public final class HTTPServer {
 		webRouter.add("GET", PROJECT_INDEX,  metaprojectHandler);
 		webRouter.add("POST", PROJECT_INDEX,  metaprojectHandler);
 		webRouter.add("GET", PROJECT_EXPORT,  metaprojectHandler);
+		webRouter.add("POST", PROJECT_CLASSIFY,  metaprojectHandler);
 		webRouter.add("GET", PROJECTS, metaprojectHandler);
 		webRouter.add("GET", PROJECTS_UNCLASSIFIED, metaprojectHandler);
 		webRouter.add("GET", SERVER_STATUS, metaprojectHandler);

@@ -13,6 +13,8 @@ import java.util.Set;
 
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
 import org.protege.editor.owl.server.api.ServerLayer;
+import org.protege.editor.owl.server.classify.ClassificationOutcome;
+import org.protege.editor.owl.server.classify.OntologyClassifier;
 import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.versioning.ChangeHistoryUtils;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
@@ -47,13 +49,17 @@ class ServerProjections {
 	private final boolean updateTripleStore;
 	private final String tripleStoreUrl;
 	private final ProjectIndexBuilder indexBuilder;
+	// Present only when the curator plugin is on the server classpath (ServiceLoader); null disables
+	// server-side classification.
+	private final OntologyClassifier classifier;
 
 	ServerProjections(ServerLayer serverLayer, boolean updateTripleStore, String tripleStoreUrl,
-			ProjectIndexBuilder indexBuilder) {
+			ProjectIndexBuilder indexBuilder, OntologyClassifier classifier) {
 		this.serverLayer = serverLayer;
 		this.updateTripleStore = updateTripleStore;
 		this.tripleStoreUrl = tripleStoreUrl;
 		this.indexBuilder = indexBuilder;
+		this.classifier = classifier;
 	}
 
 	// Reconstruct the project's ontology at HEAD = snapshot baseline + replay(change log), the same
@@ -69,6 +75,50 @@ class ServerProjections {
 	int headRevision(ProjectId projectId) throws IOException {
 		return ChangeHistoryUtils.readChanges(serverLayer.createHistoryFile(projectId))
 				.getHeadRevision().getRevisionNumber();
+	}
+
+	// Classify the materialized head via the curator (ServiceLoader) and materialize the inferred
+	// hierarchy into the project's separate <graph>/inferred named graph, tagged with the classified
+	// revision. This is a derived projection: it never touches the asserted graph, and is rebuilt from
+	// scratch each classify. Returns a short status string for the client. Triples go in Virtuoso-safe
+	// batches via replaceGraph. A rejection (role domain/range issues) leaves the inferred graph as-is.
+	String classify(ProjectId projectId, OWLOntology ont, int revision) {
+		if (classifier == null) {
+			return "no-classifier";
+		}
+		if (!updateTripleStore) {
+			return "triplestore-disabled";
+		}
+		ClassificationOutcome outcome = classifier.classify(ont);
+		if (!outcome.isClassified()) {
+			return "rejected";
+		}
+		SPARQLRepository repository = null;
+		try {
+			Project project = serverLayer.getConfiguration().getProject(projectId);
+			String graph = project.namespace() + "/" + project.getName().get() + "/inferred";
+			repository = new SPARQLRepository(tripleStoreUrl);
+			repository.initialize();
+			SparqlStore store = new SparqlStore(repository, graph);
+			store.replaceGraph(ChangesetRdf.insertsFor(outcome.getInferredAxioms()), revision);
+			logger.info("Classified project {}: wrote {} inferred axioms to <{}> at revision {}",
+					projectId, outcome.getInferredAxioms().size(), graph, revision);
+			return "classified";
+		}
+		catch (Exception e) {
+			logger.error("Failed to write inferred graph for " + projectId, e);
+			return "error";
+		}
+		finally {
+			if (repository != null) {
+				try {
+					repository.shutDown();
+				}
+				catch (Exception e) {
+					logger.warn("Error shutting down triple store connection", e);
+				}
+			}
+		}
 	}
 
 	// Load an ontology's triples into the project's Virtuoso graph in Virtuoso-safe batches, reusing

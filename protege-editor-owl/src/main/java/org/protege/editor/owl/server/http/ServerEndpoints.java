@@ -17,6 +17,7 @@ public class ServerEndpoints {
 	public static final String PROJECT_SNAPSHOT = ROOT_PATH + "/meta/project/snapshot";
 	public static final String PROJECT_INDEX = ROOT_PATH + "/meta/project/index";
 	public static final String PROJECT_EXPORT = ROOT_PATH + "/meta/project/export";
+	public static final String PROJECT_CLASSIFY = ROOT_PATH + "/meta/project/classify";
 	public static final String PROJECTS = ROOT_PATH + "/meta/projects";
 	public static final String PROJECTS_UNCLASSIFIED = ROOT_PATH + "/meta/projects/unclassified";
 	public static final String METAPROJECT = ROOT_PATH + "/meta/metaproject";
