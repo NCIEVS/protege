@@ -56,15 +56,6 @@ public final class LazyClassLoader {
     private static final String RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#";
     private static final String OWL_NS = "http://www.w3.org/2002/07/owl#";
 
-    // Structural predicates of anonymous OWL class expressions and RDF lists. A single-query closure
-    // follows these transitively (never a hierarchy/reference predicate) so it captures one entity's
-    // own anonymous structure -- restrictions, defined-class intersections, datatype enumerations --
-    // in a single result set (preserving blank-node identity) without dragging in named neighbours.
-    private static final String STRUCTURAL_PATH =
-            "(owl:intersectionOf|owl:unionOf|owl:complementOf|owl:oneOf|rdf:first|rdf:rest|"
-          + "owl:someValuesFrom|owl:allValuesFrom|owl:hasValue|owl:onProperty|owl:onClass|"
-          + "owl:onDataRange|owl:withRestrictions|owl:members|owl:distinctMembers)*";
-
     private static LazyClassLoader instance;
 
     public static synchronized LazyClassLoader getInstance() {
@@ -194,9 +185,20 @@ public final class LazyClassLoader {
      * them consistently.
      */
     private Model closure(String iri) {
+        return skolemClosure(Collections.singletonList(iri));
+    }
+
+    // BFS the skolem-node structure reachable from a set of seed nodes: fetch the seeds' own triples,
+    // then follow only skolem objects level by level (never a hierarchy/reference predicate). Replaces
+    // unbounded property-path CONSTRUCTs, which Virtuoso cannot evaluate on the full graph -- it
+    // returns an S1TAT "ANYTIME timeout" and, worse, silently truncated results that corrupt lists.
+    private Model skolemClosure(java.util.Collection<String> seeds) {
         Model total = new LinkedHashModel();
-        total.addAll(directTriples(Collections.singletonList(iri)));
-        Set<String> seen = new HashSet<>();
+        if (seeds.isEmpty()) {
+            return total;
+        }
+        total.addAll(directTriples(seeds));
+        Set<String> seen = new HashSet<>(seeds);
         Set<String> frontier = newSkolemObjects(total, seen);
         while (!frontier.isEmpty()) {
             Model level = directTriples(frontier);
@@ -242,15 +244,16 @@ public final class LazyClassLoader {
                 + "VALUES ?s { " + values + "} ?s ?p ?o } }");
     }
 
-    // Every datatype's structural (oneOf enum) closure in one CONSTRUCT; the transitive path is far
-    // too slow to evaluate once per seed, but cheap scoped to the handful of datatypes.
+    // Every enumerated datatype's oneOf-list structure, walked as a bounded skolem BFS from the
+    // datatype's definition node. A single transitive property-path CONSTRUCT ANYTIME-timed-out on the
+    // full graph and returned truncated lists, so the schema's DataOneOf axioms failed to parse.
     private Model datatypeClosure() {
-        return store.construct(LazyTripleStore.PREFIXES
-                + "CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <" + store.graph() + "> { "
+        Set<String> entries = store.selectValues(LazyTripleStore.PREFIXES
+                + "SELECT DISTINCT ?entry WHERE { GRAPH <" + store.graph() + "> { "
                 + "?dt a rdfs:Datatype . ?dt (rdfs:subClassOf|owl:equivalentClass) ?entry . "
-                + "?entry " + STRUCTURAL_PATH + " ?s . "
-                + "FILTER(isBlank(?s) || STRSTARTS(STR(?s), \"" + SKOLEM_PREFIX + "\")) "
-                + "?s ?p ?o } }");
+                + "FILTER(isBlank(?entry) || STRSTARTS(STR(?entry), \"" + SKOLEM_PREFIX + "\")) } }",
+                "entry");
+        return skolemClosure(entries);
     }
 
     private Model fetchMolecule(String classIri) {
