@@ -4,12 +4,13 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.eclipse.rdf4j.repository.sparql.SPARQLRepository;
 import org.protege.editor.owl.server.api.ServerLayer;
@@ -41,12 +42,13 @@ class ServerProjections {
 
 	private static final Logger logger = LoggerFactory.getLogger(ServerProjections.class);
 
-	// Triples per SPARQL INSERT DATA statement during a full load. Bigger batches mean far fewer HTTP
-	// round-trips (the dominant cost of a full-Thesaurus load), bounded only by Virtuoso's SPARQL
-	// compiler memory (SP030) on very large statements. Tunable at runtime with
+	// Triples per bulk POST to Virtuoso's SPARQL Graph Store CRUD endpoint during a full load. That
+	// endpoint runs the streaming TTLP bulk parser, not the SPARQL compiler, so it is not bound by the
+	// SP030 statement-size limit that capped the old INSERT DATA path at 500 triples; ~135k triples/s
+	// measured. The batch only bounds the per-POST body held in memory. Tunable at runtime with
 	// -Dnci.tripleStore.batchSize so it can be dialled in at scale without a rebuild.
 	private static final int TRIPLESTORE_BATCH =
-			Integer.getInteger("nci.tripleStore.batchSize", 10000);
+			Integer.getInteger("nci.tripleStore.batchSize", 200000);
 
 	private final ServerLayer serverLayer;
 	private final boolean updateTripleStore;
@@ -124,11 +126,12 @@ class ServerProjections {
 		}
 	}
 
-	// Load an ontology's triples into the project's Virtuoso graph in Virtuoso-safe batches, reusing
-	// the same ChangesetRdf path as commits so the initial triples match committed ones. When
-	// reload=true the graph is cleared first and the revision marker reset to the base (0), so the
-	// graph matches a freshly-written snapshot baseline (squash / recovery); at create (reload=false)
-	// the marker is left unset so the first commit replays from the start.
+	// Load an ontology's triples into the project's Virtuoso graph via the SPARQL Graph Store CRUD
+	// endpoint (streaming TTLP bulk parser), reusing the same ChangesetRdf rendering as commits so the
+	// initial triples match committed ones. When reload=true the graph is cleared first and the
+	// revision marker reset to the base (0), so the graph matches a freshly-written snapshot baseline
+	// (squash / recovery); at create (reload=false) the marker is left unset so the first commit
+	// replays from the start.
 	void loadTripleStore(ProjectId projectId, OWLOntology ont, boolean reload) {
 		if (!updateTripleStore) {
 			return;
@@ -143,27 +146,34 @@ class ServerProjections {
 			if (reload) {
 				store.clearGraph();
 			}
-			Set<Triple> pending = new HashSet<>();
+			String crudEndpoint = graphCrudEndpoint(tripleStoreUrl);
+			// One reusable renderer for the whole load: rendering each axiom in its own fresh manager +
+			// ontology (the old ChangesetRdf.axiomToTriples per call) dominated a full-Thesaurus load.
+			ChangesetRdf.Renderer renderer = new ChangesetRdf.Renderer();
+			StringBuilder batch = new StringBuilder();
+			int buffered = 0;
+			long total = 0;
 			// The ontology declaration (<ont> a owl:Ontology) is the ontology header, not an axiom, so
 			// add it explicitly: the lazy client discovers the ontology IRI from it.
 			if (ont.getOntologyID().getOntologyIRI().isPresent()) {
 				String ontologyIri = ont.getOntologyID().getOntologyIRI().get().toString();
-				pending.add(new Triple("<" + ontologyIri + ">",
-						"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>",
-						"<http://www.w3.org/2002/07/owl#Ontology>"));
+				batch.append("<").append(ontologyIri).append("> ")
+						.append("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ")
+						.append("<http://www.w3.org/2002/07/owl#Ontology> .\n");
+				buffered++;
 			}
-			long total = 0;
-			// One reusable renderer for the whole load: rendering each axiom in its own fresh manager +
-			// ontology (the old ChangesetRdf.axiomToTriples per call) dominated a full-Thesaurus load.
-			ChangesetRdf.Renderer renderer = new ChangesetRdf.Renderer();
 			for (OWLAxiom axiom : ont.getAxioms()) {
-				pending.addAll(renderer.render(axiom));
-				if (pending.size() >= TRIPLESTORE_BATCH) {
-					total += flushTriples(store, pending, projectId);
-					pending = new HashSet<>();
+				for (Triple triple : renderer.render(axiom)) {
+					batch.append(triple.toNTriple()).append('\n');
+					buffered++;
+				}
+				if (buffered >= TRIPLESTORE_BATCH) {
+					total += postTriples(crudEndpoint, graph, batch, buffered, projectId);
+					batch.setLength(0);
+					buffered = 0;
 				}
 			}
-			total += flushTriples(store, pending, projectId);
+			total += postTriples(crudEndpoint, graph, batch, buffered, projectId);
 			if (reload) {
 				// Reset the marker to the new baseline (0) so the graph and the fresh (empty) history agree.
 				store.apply(new RdfChangeSet(Collections.<Triple>emptySet(), Collections.<Triple>emptySet()), 0);
@@ -186,20 +196,48 @@ class ServerProjections {
 		}
 	}
 
-	// Insert one batch as a single small SPARQL update; a failed batch is logged and skipped so one
-	// bad batch does not abort the whole load.
-	private long flushTriples(SparqlStore store, Set<Triple> triples, ProjectId projectId) {
-		if (triples.isEmpty()) {
+	// Derive Virtuoso's SPARQL Graph Store CRUD endpoint from the SPARQL query endpoint
+	// (…/sparql[/] -> …/sparql-graph-crud/), the standard Virtuoso pairing.
+	private static String graphCrudEndpoint(String sparqlUrl) {
+		return sparqlUrl.replaceFirst("/sparql/?$", "") + "/sparql-graph-crud/";
+	}
+
+	// POST one batch of N-Triples to the CRUD endpoint (append into the graph). Virtuoso's bulk parser
+	// is not bound by the SP030 statement-size limit, so a batch can be far larger than an INSERT DATA
+	// statement. A failed batch is logged and skipped so one bad batch does not abort the whole load.
+	private long postTriples(String crudEndpoint, String graph, CharSequence ntriples, int count,
+			ProjectId projectId) {
+		if (count == 0) {
 			return 0;
 		}
+		HttpURLConnection conn = null;
 		try {
-			store.apply(new RdfChangeSet(triples, Collections.<Triple>emptySet()));
-			return triples.size();
+			URL url = new URL(crudEndpoint + "?graph-uri=" + URLEncoder.encode(graph, "UTF-8"));
+			conn = (HttpURLConnection) url.openConnection();
+			conn.setRequestMethod("POST");
+			conn.setDoOutput(true);
+			conn.setRequestProperty("Content-Type", "text/plain");
+			byte[] body = ntriples.toString().getBytes(StandardCharsets.UTF_8);
+			conn.setFixedLengthStreamingMode(body.length);
+			try (OutputStream os = conn.getOutputStream()) {
+				os.write(body);
+			}
+			int code = conn.getResponseCode();
+			if (code >= 200 && code < 300) {
+				return count;
+			}
+			logger.error("Triple store bulk POST of {} triples failed for {}: HTTP {}", count, projectId, code);
+			return 0;
 		}
 		catch (Exception e) {
-			logger.error("Triple store batch of " + triples.size() + " triples failed for " + projectId
+			logger.error("Triple store bulk POST of " + count + " triples failed for " + projectId
 					+ "; continuing", e);
 			return 0;
+		}
+		finally {
+			if (conn != null) {
+				conn.disconnect();
+			}
 		}
 	}
 
