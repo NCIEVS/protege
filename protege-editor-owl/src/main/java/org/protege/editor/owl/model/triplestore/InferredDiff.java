@@ -29,29 +29,31 @@ public final class InferredDiff {
         String inferred = asserted + "/inferred";
         LazyTripleStore store = new LazyTripleStore();
         try {
-            // Virtuoso's cost estimator rejects a cross-graph anti-join (NOT EXISTS / MINUS /
-            // OPTIONAL+!BOUND) over the full graph -- it estimates ~10000s (> the 400s limit) and
-            // refuses to run, even though the equivalent JOIN runs in milliseconds. So compute the set
-            // difference on the client from two cheap queries: all inferred edges, minus the inferred
-            // edges that are also asserted (a cross-graph join).
-            String allSubQuery = LazyTripleStore.PREFIXES
-                  + "SELECT ?c ?p WHERE { GRAPH <" + inferred + "> { "
-                  + "?c rdfs:subClassOf ?p . FILTER(isIRI(?c) && isIRI(?p)) } }";
-            String assertedSubQuery = LazyTripleStore.PREFIXES
-                  + "SELECT ?c ?p WHERE { GRAPH <" + inferred + "> { ?c rdfs:subClassOf ?p } "
-                  + "GRAPH <" + asserted + "> { ?c rdfs:subClassOf ?p } }";
-            Set<String> assertedSub = pairKeys(store, assertedSubQuery, "c", "p");
-            for (String[] pair : store.selectPairs(allSubQuery, "c", "p")) {
-                if (pair[0] == null || pair[1] == null || assertedSub.contains(key(pair[0], pair[1]))) {
-                    continue;
+            // Defined classes carry no asserted rdfs:subClassOf, so every inferred subClassOf edge whose
+            // subclass is a defined class (asserted owl:equivalentClass) is a new inferred edge -- and in
+            // practice that is the whole inferred-minus-asserted subclass diff, since a primitive class's
+            // parents are already asserted. Scoping to defined classes keeps the result under Virtuoso's
+            // 100k row cap (the full inferred subClassOf set is ~242k, over the cap) and avoids the
+            // cross-graph anti-join the cost estimator rejects (~10000s > the 400s limit) even though the
+            // JOIN runs in ms. The inferred graph has no skolem, so no isIRI filter is needed -- it also
+            // skews the plan estimate into rejection.
+            String subQuery = LazyTripleStore.PREFIXES
+                  + "SELECT ?c ?p WHERE { "
+                  + "  GRAPH <" + inferred + "> { ?c rdfs:subClassOf ?p } "
+                  + "  GRAPH <" + asserted + "> { ?c owl:equivalentClass ?e } "
+                  + "  FILTER(?c != ?p) }";
+            for (String[] pair : store.selectPairs(subQuery, "c", "p")) {
+                if (pair[0] != null && pair[1] != null) {
+                    result.add(df.getOWLSubClassOfAxiom(df.getOWLClass(IRI.create(pair[0])),
+                            df.getOWLClass(IRI.create(pair[1]))));
                 }
-                result.add(df.getOWLSubClassOfAxiom(df.getOWLClass(IRI.create(pair[0])),
-                        df.getOWLClass(IRI.create(pair[1]))));
             }
 
+            // Inferred equivalences are few; still drop any already asserted (either direction) via a
+            // cheap client-side diff from two JOIN-only queries (no anti-join, no isIRI).
             String allEquivQuery = LazyTripleStore.PREFIXES
                   + "SELECT ?a ?b WHERE { GRAPH <" + inferred + "> { ?a owl:equivalentClass ?b . "
-                  + "FILTER(isIRI(?a) && isIRI(?b) && ?a != ?b) } }";
+                  + "FILTER(?a != ?b) } }";
             String assertedEquivQuery = LazyTripleStore.PREFIXES
                   + "SELECT ?a ?b WHERE { GRAPH <" + inferred + "> { ?a owl:equivalentClass ?b } "
                   + "GRAPH <" + asserted + "> { { ?a owl:equivalentClass ?b } UNION { ?b owl:equivalentClass ?a } } }";
