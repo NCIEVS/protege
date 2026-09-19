@@ -41,9 +41,12 @@ class ServerProjections {
 
 	private static final Logger logger = LoggerFactory.getLogger(ServerProjections.class);
 
-	// Load the ontology into Virtuoso in batches of this many triples per SPARQL update; Virtuoso's
-	// SPARQL compiler exhausts memory (SP030) on much larger INSERT DATA statements.
-	private static final int TRIPLESTORE_BATCH = 500;
+	// Triples per SPARQL INSERT DATA statement during a full load. Bigger batches mean far fewer HTTP
+	// round-trips (the dominant cost of a full-Thesaurus load), bounded only by Virtuoso's SPARQL
+	// compiler memory (SP030) on very large statements. Tunable at runtime with
+	// -Dnci.tripleStore.batchSize so it can be dialled in at scale without a rebuild.
+	private static final int TRIPLESTORE_BATCH =
+			Integer.getInteger("nci.tripleStore.batchSize", 10000);
 
 	private final ServerLayer serverLayer;
 	private final boolean updateTripleStore;
