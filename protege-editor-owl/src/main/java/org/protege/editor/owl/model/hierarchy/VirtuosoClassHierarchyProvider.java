@@ -180,12 +180,14 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         return definedByGenus().getOrDefault(parent, Collections.emptySet());
     }
 
-    // A class's asserted named subclasses (the defined-class children come from the genus index).
+    // A class's asserted named subclasses (the defined-class children come from the genus index). No
+    // isIRI filter: it is redundant with the skolem STRSTARTS exclusion and skews Virtuoso's estimate
+    // into a 42000 cost-limit rejection.
     private String subclassChildrenQuery(String parentIri) {
         return PREFIXES
               + "SELECT DISTINCT ?c WHERE { GRAPH <" + store.graph() + "> { "
               + "  ?c rdfs:subClassOf <" + parentIri + "> "
-              + "  FILTER(isIRI(?c) && ?c != <" + parentIri + "> && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
+              + "  FILTER(?c != <" + parentIri + "> && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
               + "} }";
     }
 
@@ -199,7 +201,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
               + "SELECT DISTINCT ?c ?gc WHERE { GRAPH <" + store.graph() + "> { "
               + "  VALUES ?c { " + values + "} "
               + "  ?gc rdfs:subClassOf ?c "
-              + "  FILTER(isIRI(?gc) && ?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) "
+              + "  FILTER(?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) "
               + "} }";
     }
 
@@ -228,7 +230,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         String query = PREFIXES
               + "SELECT ?def ?genus WHERE { GRAPH <" + store.graph() + "> { "
               + "  ?def owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?genus . "
-              + "  FILTER(isIRI(?def) && isIRI(?genus) && ?def != ?genus "
+              + "  FILTER(?def != ?genus "
               + "    && !STRSTARTS(STR(?def), \"urn:skolem:\") && !STRSTARTS(STR(?genus), \"urn:skolem:\")) "
               + "} }";
         for (String[] row : store.selectPairs(query, "def", "genus")) {
