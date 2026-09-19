@@ -54,6 +54,9 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     private final Map<OWLClass, Set<OWLClass>> parentsCache = new ConcurrentHashMap<>();
     private final Map<OWLClass, Set<OWLClass>> equivalentsCache = new ConcurrentHashMap<>();
 
+    // genus -> defined classes index, built once from the whole graph; see definedByGenus().
+    private volatile Map<OWLClass, Set<OWLClass>> definedByGenus;
+
     // Local edits go to the in-RAM ontology before they reach Virtuoso, so keep the browsing caches
     // (and the tree) in step with named subClassOf add/removes instead of only re-querying the store.
     private final OWLOntologyChangeListener ontologyListener = this::handleOntologyChanges;
@@ -76,6 +79,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         childrenCache.clear();
         parentsCache.clear();
         equivalentsCache.clear();
+        definedByGenus = null;
     }
 
     @Override
@@ -140,13 +144,16 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // an unbounded variable and Virtuoso's cost estimator rejected it ("estimated execution time
     // exceeds the limit").
     private Set<OWLClass> fetchChildrenAndGrandchildren(OWLClass parent) {
-        Set<OWLClass> children = runClassQuery(childrenQuery(parent.getIRI().toString()), "c");
+        Set<OWLClass> children = new HashSet<>(runClassQuery(subclassChildrenQuery(parent.getIRI().toString()), "c"));
+        children.addAll(definedChildren(parent));
         childrenCache.put(parent, children);
         if (children.isEmpty()) {
             return children;
         }
+        // Prefetch each child's children (for the +box) in one bounded subClassOf query over the
+        // children (VALUES-anchored), plus the defined-class children from the cached genus index.
         Map<OWLClass, Set<OWLClass>> grandchildren = new HashMap<>();
-        for (String[] row : store.selectPairs(grandchildrenQuery(children), "c", "gc")) {
+        for (String[] row : store.selectPairs(subclassGrandchildrenQuery(children), "c", "gc")) {
             if (row[0] == null || row[1] == null) {
                 continue;
             }
@@ -154,26 +161,36 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
                     .add(df.getOWLClass(IRI.create(row[1])));
         }
         for (OWLClass child : children) {
+            Set<OWLClass> defined = definedChildren(child);
+            if (!defined.isEmpty()) {
+                grandchildren.computeIfAbsent(child, k -> new HashSet<>()).addAll(defined);
+            }
+        }
+        for (OWLClass child : children) {
             childrenCache.putIfAbsent(child, grandchildren.getOrDefault(child, Collections.emptySet()));
         }
         return children;
     }
 
-    // A class's direct children: asserted subclasses or defined classes whose genus is the parent.
-    // Anchored on the parent, so the list path is bounded.
-    private String childrenQuery(String parentIri) {
+    // Defined classes whose genus (a named conjunct of their equivalentClass intersection) is parent,
+    // from the once-built genus index. This replaces the reverse list path (?l rdf:rest*/rdf:first
+    // <parent>, parent bound as OBJECT over many VALUES anchors), which made Virtuoso's cost estimator
+    // reject the grandchildren query on the full graph ("estimated execution time exceeds the limit").
+    private Set<OWLClass> definedChildren(OWLClass parent) {
+        return definedByGenus().getOrDefault(parent, Collections.emptySet());
+    }
+
+    // A class's asserted named subclasses (the defined-class children come from the genus index).
+    private String subclassChildrenQuery(String parentIri) {
         return PREFIXES
               + "SELECT DISTINCT ?c WHERE { GRAPH <" + store.graph() + "> { "
-              + "  { ?c rdfs:subClassOf <" + parentIri + "> } "
-              + "  UNION "
-              + "  { ?c owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first <" + parentIri + "> } "
+              + "  ?c rdfs:subClassOf <" + parentIri + "> "
               + "  FILTER(isIRI(?c) && ?c != <" + parentIri + "> && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
               + "} }";
     }
 
-    // The children of a known set of classes, the set bound by VALUES so each anchor is fixed and the
-    // list path stays bounded (unlike a nested grandchildren OPTIONAL over an unbound variable).
-    private String grandchildrenQuery(Set<OWLClass> classes) {
+    // The asserted named subclasses of a known set of classes, bound by VALUES.
+    private String subclassGrandchildrenQuery(Set<OWLClass> classes) {
         StringBuilder values = new StringBuilder();
         for (OWLClass c : classes) {
             values.append('<').append(c.getIRI()).append("> ");
@@ -181,11 +198,47 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         return PREFIXES
               + "SELECT DISTINCT ?c ?gc WHERE { GRAPH <" + store.graph() + "> { "
               + "  VALUES ?c { " + values + "} "
-              + "  { ?gc rdfs:subClassOf ?c } "
-              + "  UNION "
-              + "  { ?gc owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?c } "
+              + "  ?gc rdfs:subClassOf ?c "
               + "  FILTER(isIRI(?gc) && ?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) "
               + "} }";
+    }
+
+    // genus -> defined classes that name it as a conjunct of their equivalentClass intersection. Built
+    // once (forward direction, ~0.5s over the full graph) and cached, so per-node children lookups
+    // never issue the reverse list path Virtuoso cannot plan. Reset by clearCaches() on refresh.
+    private Map<OWLClass, Set<OWLClass>> definedByGenus() {
+        Map<OWLClass, Set<OWLClass>> map = definedByGenus;
+        if (map == null) {
+            synchronized (this) {
+                map = definedByGenus;
+                if (map == null) {
+                    map = buildDefinedByGenus();
+                    definedByGenus = map;
+                }
+            }
+        }
+        return map;
+    }
+
+    private Map<OWLClass, Set<OWLClass>> buildDefinedByGenus() {
+        Map<OWLClass, Set<OWLClass>> map = new HashMap<>();
+        if (!store.isConfigured()) {
+            return map;
+        }
+        String query = PREFIXES
+              + "SELECT ?def ?genus WHERE { GRAPH <" + store.graph() + "> { "
+              + "  ?def owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?genus . "
+              + "  FILTER(isIRI(?def) && isIRI(?genus) && ?def != ?genus "
+              + "    && !STRSTARTS(STR(?def), \"urn:skolem:\") && !STRSTARTS(STR(?genus), \"urn:skolem:\")) "
+              + "} }";
+        for (String[] row : store.selectPairs(query, "def", "genus")) {
+            if (row[0] == null || row[1] == null) {
+                continue;
+            }
+            map.computeIfAbsent(df.getOWLClass(IRI.create(row[1])), k -> new HashSet<>())
+                    .add(df.getOWLClass(IRI.create(row[0])));
+        }
+        return map;
     }
 
     @Override
