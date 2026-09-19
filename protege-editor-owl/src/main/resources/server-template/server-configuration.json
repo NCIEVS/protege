@@ -717,7 +717,7 @@
   ],
   "properties": {
     "ldap_dn_prefix": "CN\u003d",
-    "login_timeout_period": "1800000",
+    "login_timeout_period": "14400000",
     "codegen_file": "gencode",
     "authenticate": "org.protege.editor.owl.server.security.DefaultLoginService",
     "ldap_port": "636",
