@@ -29,23 +29,35 @@ public final class InferredDiff {
         String inferred = asserted + "/inferred";
         LazyTripleStore store = new LazyTripleStore();
         try {
-            // Defined classes carry no asserted rdfs:subClassOf, so every inferred subClassOf edge whose
-            // subclass is a defined class (asserted owl:equivalentClass) is a new inferred edge -- and in
-            // practice that is the whole inferred-minus-asserted subclass diff, since a primitive class's
-            // parents are already asserted. Scoping to defined classes keeps the result under Virtuoso's
-            // 100k row cap (the full inferred subClassOf set is ~242k, over the cap) and avoids the
-            // cross-graph anti-join the cost estimator rejects (~10000s > the 400s limit) even though the
-            // JOIN runs in ms. The inferred graph has no skolem, so no isIRI filter is needed -- it also
-            // skews the plan estimate into rejection.
-            String subQuery = LazyTripleStore.PREFIXES
-                  + "SELECT ?c ?p WHERE { "
+            // Classification results = subsumptions the reasoner DISCOVERED: inferred subClassOf edges
+            // that are neither asserted nor trivially entailed by a defined class's own genus (a defined
+            // class bar = foo AND (R some X) always yields bar subClassOf foo -- that is definitional,
+            // not a discovery). Two anchored shapes, each cheap because the anchor scopes the cross-graph
+            // anti-join Virtuoso would otherwise reject (~10000s) on the full graph:
+            //   (1) a primitive class (asserted owl:Class, no equivalentClass) with an inferred parent it
+            //       does not assert -- the reasoner-derived subsumption (e.g. bar placed under foo);
+            //   (2) a defined class with an inferred parent that is not one of its own genus conjuncts.
+            // (2) is usually empty; (1) is the typical curator result. Both are tiny, so the panel no
+            // longer materialises the whole inferred hierarchy (which was ~37k trivial genus edges).
+            String primitiveDiscovered = LazyTripleStore.PREFIXES
+                  + "SELECT DISTINCT ?c ?p WHERE { "
                   + "  GRAPH <" + inferred + "> { ?c rdfs:subClassOf ?p } "
-                  + "  GRAPH <" + asserted + "> { ?c owl:equivalentClass ?e } "
-                  + "  FILTER(?c != ?p) }";
-            for (String[] pair : store.selectPairs(subQuery, "c", "p")) {
-                if (pair[0] != null && pair[1] != null) {
-                    result.add(df.getOWLSubClassOfAxiom(df.getOWLClass(IRI.create(pair[0])),
-                            df.getOWLClass(IRI.create(pair[1]))));
+                  + "  GRAPH <" + asserted + "> { ?c a owl:Class } "
+                  + "  FILTER NOT EXISTS { GRAPH <" + asserted + "> { ?c rdfs:subClassOf ?p } } "
+                  + "  FILTER NOT EXISTS { GRAPH <" + asserted + "> { ?c owl:equivalentClass ?e } } }";
+            String definedDiscovered = LazyTripleStore.PREFIXES
+                  + "SELECT DISTINCT ?c ?p WHERE { "
+                  + "  GRAPH <" + inferred + "> { ?c rdfs:subClassOf ?p } "
+                  + "  GRAPH <" + asserted + "> { ?c owl:equivalentClass ?edef } "
+                  + "  FILTER(?c != ?p) "
+                  + "  FILTER NOT EXISTS { GRAPH <" + asserted + "> { "
+                  + "    ?c owl:equivalentClass ?e2 . ?e2 owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?p } } }";
+            for (String query : new String[] { primitiveDiscovered, definedDiscovered }) {
+                for (String[] pair : store.selectPairs(query, "c", "p")) {
+                    if (pair[0] != null && pair[1] != null) {
+                        result.add(df.getOWLSubClassOfAxiom(df.getOWLClass(IRI.create(pair[0])),
+                                df.getOWLClass(IRI.create(pair[1]))));
+                    }
                 }
             }
 
