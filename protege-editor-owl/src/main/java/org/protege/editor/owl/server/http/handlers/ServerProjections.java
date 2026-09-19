@@ -241,6 +241,37 @@ class ServerProjections {
 		}
 	}
 
+	// Drop the project's Virtuoso graphs (asserted + inferred) and their revision markers when the
+	// project is deleted. Best-effort: a derived graph left behind is recoverable, so failure is logged
+	// not fatal. Takes the Project captured before it was removed from the configuration.
+	void dropProject(Project project) {
+		if (!updateTripleStore) {
+			return;
+		}
+		String graph = project.namespace() + "/" + project.getName().get();
+		SPARQLRepository repository = null;
+		try {
+			repository = new SPARQLRepository(tripleStoreUrl);
+			repository.initialize();
+			new SparqlStore(repository, graph).dropGraph();
+			new SparqlStore(repository, graph + "/inferred").dropGraph();
+			logger.info("Dropped triple store graphs <{}> and <{}/inferred>", graph, graph);
+		}
+		catch (Exception e) {
+			logger.error("Failed to drop triple store graph <" + graph + ">", e);
+		}
+		finally {
+			if (repository != null) {
+				try {
+					repository.shutDown();
+				}
+				catch (Exception e) {
+					logger.warn("Error shutting down triple store connection", e);
+				}
+			}
+		}
+	}
+
 	// Build the Lucene index for the ontology (clearing the directory first) and record the revision
 	// it reflects. Non-fatal on failure. Disabled when no ProjectIndexBuilder is on the classpath.
 	void buildIndex(ProjectId projectId, OWLOntology ont, int revision) {

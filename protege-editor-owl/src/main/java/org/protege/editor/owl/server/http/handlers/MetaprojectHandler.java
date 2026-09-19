@@ -313,7 +313,22 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 
 	private void deleteExistingProject(AuthToken authToken, ProjectId projectId, boolean incFiles) throws ServerException {
 		try {
+			// Capture the project before deletion removes it from the configuration, so its triple-store
+			// graph can still be located afterward.
+			Project project = null;
+			try {
+				project = serverLayer.getConfiguration().getProject(projectId);
+			}
+			catch (Exception e) {
+				// No such project in the configuration; nothing to drop from the triple store.
+			}
 			serverLayer.deleteProject(authToken, projectId, incFiles);
+			// Deleting the project's files also drops its Virtuoso graphs (best-effort; a derived graph
+			// left behind is recoverable). Config-only removals (incFiles=false) keep both, so the
+			// project can be restored.
+			if (incFiles && project != null) {
+				projections.dropProject(project);
+			}
 		}
 		catch (AuthorizationException e) {
 			throw new ServerException(StatusCodes.UNAUTHORIZED, "Access denied", e);
