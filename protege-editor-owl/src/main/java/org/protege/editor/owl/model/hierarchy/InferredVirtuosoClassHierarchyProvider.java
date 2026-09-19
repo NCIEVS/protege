@@ -94,9 +94,7 @@ public class InferredVirtuosoClassHierarchyProvider extends AbstractOWLObjectHie
         }
         Set<OWLClass> children = childrenCache.get(object);
         if (children == null) {
-            children = object.equals(thing)
-                    ? runClassQuery(rootsQuery(), "c")
-                    : runClassQuery(childrenQuery(object), "c");
+            children = object.equals(thing) ? rootsChildren() : runClassQuery(childrenQuery(object), "c");
             childrenCache.put(object, children);
         }
         prefetchLabels(children);
@@ -116,21 +114,27 @@ public class InferredVirtuosoClassHierarchyProvider extends AbstractOWLObjectHie
         LazyLabelCache.getInstance().prefetch(iris);
     }
 
-    // Children of owl:Thing in the inferred hierarchy = classes in the inferred graph with no inferred
-    // named superclass (the roots of the inferred subclass DAG).
-    private String rootsQuery() {
-        return PREFIXES
-              + "SELECT DISTINCT ?c WHERE { GRAPH <" + graph() + "> { "
-              + "  { ?c rdfs:subClassOf ?p } UNION { ?s rdfs:subClassOf ?c } "
-              + "  FILTER(isIRI(?c)) "
-              + "  FILTER NOT EXISTS { ?c rdfs:subClassOf ?sup . FILTER(isIRI(?sup)) } "
-              + "} }";
+    // Children of owl:Thing in the inferred hierarchy = the roots of the inferred subclass DAG: classes
+    // that have inferred children but no inferred parent. Computed as a client-side set difference
+    // (superclasses minus those that are themselves subclasses) from two JOIN-only queries: the
+    // single-query form (UNION + isIRI + NOT EXISTS anti-join) is estimated at thousands of seconds and
+    // rejected by Virtuoso's cost estimator on the full graph. The inferred graph has no skolem nodes,
+    // so no isIRI filter is needed (it also skews the estimate into rejection).
+    private Set<OWLClass> rootsChildren() {
+        Set<OWLClass> superclasses = runClassQuery(PREFIXES
+              + "SELECT DISTINCT ?p WHERE { GRAPH <" + graph() + "> { ?c rdfs:subClassOf ?p } }", "p");
+        Set<OWLClass> internal = runClassQuery(PREFIXES
+              + "SELECT DISTINCT ?p WHERE { GRAPH <" + graph() + "> { "
+              + "?c rdfs:subClassOf ?p . ?p rdfs:subClassOf ?sup } }", "p");
+        superclasses.removeAll(internal);
+        superclasses.remove(thing); // Thing is the tree root itself, never its own child
+        return superclasses;
     }
 
     private String childrenQuery(OWLClass parent) {
         return PREFIXES
               + "SELECT DISTINCT ?c WHERE { GRAPH <" + graph() + "> { "
-              + "  ?c rdfs:subClassOf <" + parent.getIRI() + "> . FILTER(isIRI(?c)) "
+              + "  ?c rdfs:subClassOf <" + parent.getIRI() + "> "
               + "} }";
     }
 
@@ -145,7 +149,7 @@ public class InferredVirtuosoClassHierarchyProvider extends AbstractOWLObjectHie
     private Set<OWLClass> queryParents(OWLClass object) {
         final String query = PREFIXES
               + "SELECT DISTINCT ?p WHERE { GRAPH <" + graph() + "> { "
-              + "  <" + object.getIRI() + "> rdfs:subClassOf ?p . FILTER(isIRI(?p)) "
+              + "  <" + object.getIRI() + "> rdfs:subClassOf ?p "
               + "} }";
         Set<OWLClass> parents = runClassQuery(query, "p");
         // No inferred parent -> it hangs directly under the root of the inferred tree.
@@ -168,7 +172,7 @@ public class InferredVirtuosoClassHierarchyProvider extends AbstractOWLObjectHie
         final String query = PREFIXES
               + "SELECT DISTINCT ?e WHERE { GRAPH <" + graph() + "> { "
               + "  { <" + c + "> owl:equivalentClass ?e } UNION { ?e owl:equivalentClass <" + c + "> } "
-              + "  FILTER(isIRI(?e) && ?e != <" + c + ">) "
+              + "  FILTER(?e != <" + c + ">) "
               + "} }";
         return runClassQuery(query, "e");
     }
