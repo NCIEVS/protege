@@ -62,6 +62,10 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     private final Set<OWLClass> grandchildrenPrefetched =
             Collections.newSetFromMap(new ConcurrentHashMap<OWLClass, Boolean>());
 
+    // Guards the one-shot background warm-up (genus index + roots) per opened project.
+    private final java.util.concurrent.atomic.AtomicBoolean warmUpStarted =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     // Local edits go to the in-RAM ontology before they reach Virtuoso, so keep the browsing caches
     // (and the tree) in step with named subClassOf add/removes instead of only re-querying the store.
     private final OWLOntologyChangeListener ontologyListener = this::handleOntologyChanges;
@@ -78,7 +82,6 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         // Nothing to load: the hierarchy is sourced from the triple store, not an in-RAM ontology.
         clearCaches();
         fireHierarchyChanged();
-        warmUpAsync();
     }
 
     public void clearCaches() {
@@ -87,18 +90,20 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         equivalentsCache.clear();
         grandchildrenPrefetched.clear();
         definedByGenus = null;
+        warmUpStarted.set(false);
     }
 
     // Prime, off the EDT, everything the first tree interaction needs: the genus index (~0.9s once)
     // and owl:Thing's children (the roots and their child sets), so the first click on Thing is
-    // instant instead of paying the genus build plus the roots-children fetch. Best-effort.
-    private void warmUpAsync() {
-        if (!store.isConfigured()) {
-            return;
+    // instant instead of paying the genus build plus the roots-children fetch. Best-effort, once per
+    // opened project. Triggered from getRoots (the graph is configured by then), not setOntologies
+    // (which can fire before Open-From-Server sets the graph).
+    private void maybeWarmUp() {
+        if (store.isConfigured() && warmUpStarted.compareAndSet(false, true)) {
+            Thread t = new Thread(this::warmUp, "virtuoso-hierarchy-warmup");
+            t.setDaemon(true);
+            t.start();
         }
-        Thread t = new Thread(this::warmUp, "virtuoso-hierarchy-warmup");
-        t.setDaemon(true);
-        t.start();
     }
 
     private void warmUp() {
@@ -116,6 +121,9 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
 
     @Override
     public Set<OWLClass> getRoots() {
+        // The tree asks for roots once the project graph is open, so kick the one-shot background
+        // warm-up here rather than at setOntologies (which can fire before the graph is configured).
+        maybeWarmUp();
         return Collections.singleton(thing);
     }
 
