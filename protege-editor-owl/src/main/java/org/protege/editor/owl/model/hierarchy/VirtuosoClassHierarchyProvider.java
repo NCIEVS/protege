@@ -57,6 +57,11 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // genus -> defined classes index, built once from the whole graph; see definedByGenus().
     private volatile Map<OWLClass, Set<OWLClass>> definedByGenus;
 
+    // Nodes whose children have already had their own children primed (the one-level-ahead +box
+    // prefetch), so re-expanding a node does not re-run the bulk sibling prefetch.
+    private final Set<OWLClass> grandchildrenPrefetched =
+            Collections.newSetFromMap(new ConcurrentHashMap<OWLClass, Boolean>());
+
     // Local edits go to the in-RAM ontology before they reach Virtuoso, so keep the browsing caches
     // (and the tree) in step with named subClassOf add/removes instead of only re-querying the store.
     private final OWLOntologyChangeListener ontologyListener = this::handleOntologyChanges;
@@ -73,13 +78,40 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         // Nothing to load: the hierarchy is sourced from the triple store, not an in-RAM ontology.
         clearCaches();
         fireHierarchyChanged();
+        warmUpAsync();
     }
 
     public void clearCaches() {
         childrenCache.clear();
         parentsCache.clear();
         equivalentsCache.clear();
+        grandchildrenPrefetched.clear();
         definedByGenus = null;
+    }
+
+    // Prime, off the EDT, everything the first tree interaction needs: the genus index (~0.9s once)
+    // and owl:Thing's children (the roots and their child sets), so the first click on Thing is
+    // instant instead of paying the genus build plus the roots-children fetch. Best-effort.
+    private void warmUpAsync() {
+        if (!store.isConfigured()) {
+            return;
+        }
+        Thread t = new Thread(this::warmUp, "virtuoso-hierarchy-warmup");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void warmUp() {
+        try {
+            if (!store.isConfigured()) {
+                return;
+            }
+            definedByGenus();
+            getUnfilteredChildren(thing);
+        }
+        catch (Exception e) {
+            // Warm-up is a pure optimisation; the first interaction will simply do the work on demand.
+        }
     }
 
     @Override
@@ -94,18 +126,18 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         }
         Set<OWLClass> children = childrenCache.get(object);
         if (children == null) {
-            if (object.equals(thing)) {
-                children = runClassQuery(thingChildrenQuery(), "c");
-                childrenCache.put(object, children);
-            } else {
-                children = fetchChildrenAndGrandchildren(object);
-            }
+            children = object.equals(thing)
+                    ? runClassQuery(thingChildrenQuery(), "c")
+                    : fetchChildren(object);
+            childrenCache.put(object, children);
         }
-        // The returned children are about to be sorted (a render per child) and painted, so batch-
-        // prime their labels in one query. This fires for cache hits too: the tree computes a node's
-        // +box by loading and sorting that node's children, so priming the returned set here means a
-        // child's grandchildren are primed in one query right before they are sorted, instead of one
-        // SPARQL per grandchild. prefetch() skips already-cached IRIs, so repeat calls are cheap.
+        // Prime each child's own children once, in a single bulk query, so this expansion's per-child
+        // +box lookups (getChildren on every child) are cache hits instead of a SPARQL round-trip each
+        // -- the "one level ahead" prefetch. Uniform for owl:Thing: clicking it was ~40 serial queries
+        // (a fetch per root) and is now the roots query plus one bulk children query.
+        if (!children.isEmpty() && grandchildrenPrefetched.add(object)) {
+            cacheChildrenOf(children);
+        }
         prefetchLabels(children);
         return children;
     }
@@ -136,40 +168,37 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
               + "} }";
     }
 
-    // Fetch a parent's children AND each child's children, caching every child's child set so the
-    // tree's per-child +box lookups (a getChildren call on each child) are cache hits instead of a
-    // SPARQL round-trip each -- the "one depth ahead" prefetch. Done as TWO bounded queries rather
-    // than one nested two-level query: the grandchildren query binds the children with VALUES so the
-    // defined-class list path (rdf:rest*/rdf:first) is anchored, whereas the nested form left it over
-    // an unbounded variable and Virtuoso's cost estimator rejected it ("estimated execution time
-    // exceeds the limit").
-    private Set<OWLClass> fetchChildrenAndGrandchildren(OWLClass parent) {
+    // Fetch a class's direct children: its asserted named subclasses plus the defined classes whose
+    // genus is it (from the genus index). No prefetch here -- getUnfilteredChildren primes the next
+    // level in bulk for all siblings at once.
+    private Set<OWLClass> fetchChildren(OWLClass parent) {
         Set<OWLClass> children = new HashSet<>(runClassQuery(subclassChildrenQuery(parent.getIRI().toString()), "c"));
         children.addAll(definedChildren(parent));
-        childrenCache.put(parent, children);
-        if (children.isEmpty()) {
-            return children;
-        }
-        // Prefetch each child's children (for the +box) in one bounded subClassOf query over the
-        // children (VALUES-anchored), plus the defined-class children from the cached genus index.
-        Map<OWLClass, Set<OWLClass>> grandchildren = new HashMap<>();
-        for (String[] row : store.selectPairs(subclassGrandchildrenQuery(children), "c", "gc")) {
+        return children;
+    }
+
+    // Prime the child set of every class in 'parents' with ONE VALUES-bound subClassOf query plus the
+    // genus index, so their +box lookups are cache hits instead of a SPARQL round-trip each. This is
+    // the bulk core: clicking owl:Thing primes all ~21 roots' children (hundreds of rows) in a single
+    // query rather than one fetch per root. putIfAbsent leaves any already-authoritative set in place.
+    private void cacheChildrenOf(Set<OWLClass> parents) {
+        Map<OWLClass, Set<OWLClass>> childrenByParent = new HashMap<>();
+        for (String[] row : store.selectPairs(subclassGrandchildrenQuery(parents), "c", "gc")) {
             if (row[0] == null || row[1] == null) {
                 continue;
             }
-            grandchildren.computeIfAbsent(df.getOWLClass(IRI.create(row[0])), k -> new HashSet<>())
+            childrenByParent.computeIfAbsent(df.getOWLClass(IRI.create(row[0])), k -> new HashSet<>())
                     .add(df.getOWLClass(IRI.create(row[1])));
         }
-        for (OWLClass child : children) {
-            Set<OWLClass> defined = definedChildren(child);
+        for (OWLClass parent : parents) {
+            Set<OWLClass> defined = definedChildren(parent);
             if (!defined.isEmpty()) {
-                grandchildren.computeIfAbsent(child, k -> new HashSet<>()).addAll(defined);
+                childrenByParent.computeIfAbsent(parent, k -> new HashSet<>()).addAll(defined);
             }
         }
-        for (OWLClass child : children) {
-            childrenCache.putIfAbsent(child, grandchildren.getOrDefault(child, Collections.emptySet()));
+        for (OWLClass parent : parents) {
+            childrenCache.putIfAbsent(parent, childrenByParent.getOrDefault(parent, Collections.emptySet()));
         }
-        return children;
     }
 
     // Defined classes whose genus (a named conjunct of their equivalentClass intersection) is parent,
