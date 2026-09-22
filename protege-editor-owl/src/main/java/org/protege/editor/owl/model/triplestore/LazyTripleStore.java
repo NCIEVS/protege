@@ -209,9 +209,9 @@ public final class LazyTripleStore {
     public java.util.List<String[]> selectPairsCsv(String query) {
         java.util.List<String[]> out = new java.util.ArrayList<>();
         for (String line : csvRows(query)) {
-            String[] pair = parseCsvIriPair(line);
-            if (pair != null) {
-                out.add(pair);
+            java.util.List<String> cells = splitCsv(line);
+            if (cells.size() >= 2) {
+                out.add(new String[] { cells.get(0), cells.get(1) });
             }
         }
         return out;
@@ -221,9 +221,9 @@ public final class LazyTripleStore {
     public Set<String> selectValuesCsv(String query) {
         Set<String> out = new HashSet<>();
         for (String line : csvRows(query)) {
-            String v = parseCsvValue(line);
-            if (v != null) {
-                out.add(v);
+            java.util.List<String> cells = splitCsv(line);
+            if (!cells.isEmpty() && !cells.get(0).isEmpty()) {
+                out.add(cells.get(0));
             }
         }
         return out;
@@ -263,32 +263,33 @@ public final class LazyTripleStore {
         return rows;
     }
 
-    // A single Virtuoso CSV cell: "value" (quoted) or bare. IRIs carry no embedded quote/comma.
-    private static String parseCsvValue(String line) {
-        if (line.isEmpty()) {
-            return null;
-        }
-        if (line.length() >= 2 && line.charAt(0) == '"' && line.endsWith("\"")) {
-            return line.substring(1, line.length() - 1);
-        }
-        return line;
-    }
-
-    // Virtuoso CSV renders each cell quoted: "a","b". IRIs carry no embedded quote/comma, so a two-IRI
-    // row is parsed by splitting on the "," between the quoted cells.
-    private static String[] parseCsvIriPair(String line) {
-        if (line.isEmpty()) {
-            return null;
-        }
-        if (line.charAt(0) == '"' && line.endsWith("\"")) {
-            int mid = line.indexOf("\",\"");
-            if (mid < 0) {
-                return null;
+    // Split one Virtuoso CSV row into cells, honouring quotes. Cells are either "quoted" (IRIs/strings,
+    // no embedded quote/comma in our queries) or bare (e.g. an EXISTS flag 1/0). Quotes are stripped.
+    private static java.util.List<String> splitCsv(String line) {
+        java.util.List<String> cells = new java.util.ArrayList<>();
+        int i = 0;
+        int n = line.length();
+        while (i <= n) {
+            if (i < n && line.charAt(i) == '"') {
+                int end = line.indexOf('"', i + 1);
+                if (end < 0) {
+                    cells.add(line.substring(i + 1));
+                    break;
+                }
+                cells.add(line.substring(i + 1, end));
+                i = end + 2; // past the closing quote and the following comma (if any)
             }
-            return new String[] { line.substring(1, mid), line.substring(mid + 3, line.length() - 1) };
+            else {
+                int comma = line.indexOf(',', i);
+                if (comma < 0) {
+                    cells.add(line.substring(i));
+                    break;
+                }
+                cells.add(line.substring(i, comma));
+                i = comma + 1;
+            }
         }
-        int comma = line.indexOf(',');
-        return comma < 0 ? null : new String[] { line.substring(0, comma), line.substring(comma + 1) };
+        return cells;
     }
 
     /** All triples with the given IRI as subject, within the project graph. */

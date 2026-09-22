@@ -5,6 +5,7 @@ import org.semanticweb.owlapi.model.OWLObject;
 import org.semanticweb.owlapi.model.OWLOntology;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -38,6 +39,16 @@ public interface OWLObjectHierarchyProvider<N extends OWLObject> extends Disposa
 
 
     public Set<N> getChildren(N object);
+
+
+    /**
+     * Whether {@code object} is a leaf (no children), if the provider can answer without loading the
+     * children (e.g. from a cached flag). The empty default lets the tree fall back to loading and
+     * counting children, so providers that do not override this are unaffected.
+     */
+    default Optional<Boolean> isLeaf(N object) {
+        return Optional.empty();
+    }
 
 
     public Set<N> getDescendants(N object);

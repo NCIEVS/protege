@@ -122,7 +122,17 @@ public class OWLObjectTreeNode<N extends OWLObject> extends DefaultMutableTreeNo
     }
 
 
+    @SuppressWarnings("unchecked")
     public boolean isLeaf() {
+        Object userObject = getUserObject();
+        if (userObject != null) {
+            // A lazy provider can report leaf status from a cached flag, avoiding loading (and
+            // materialising) this node's children just to draw its +box. Empty = fall back to loading.
+            Optional<Boolean> leaf = tree.getProvider().isLeaf((N) userObject);
+            if (leaf.isPresent()) {
+                return leaf.get();
+            }
+        }
         return getChildCount() == 0;
     }
 

@@ -65,10 +65,10 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // The graph the index was built for; the index survives clearCaches and rebuilds only on a change.
     private volatile String definedByGenusGraph;
 
-    // Nodes whose children have already had their own children primed (the one-level-ahead +box
-    // prefetch), so re-expanding a node does not re-run the bulk sibling prefetch.
-    private final Set<OWLClass> grandchildrenPrefetched =
-            Collections.newSetFromMap(new ConcurrentHashMap<OWLClass, Boolean>());
+    // Leaf status per class, recorded from the per-child EXISTS flag when its parent's children were
+    // fetched; answers isLeaf() so the tree draws a node's children's +boxes without loading the
+    // grandchildren.
+    private final Map<OWLClass, Boolean> leafCache = new ConcurrentHashMap<>();
 
     // Guards the one-shot background warm-up (genus index + roots) per opened project.
     private final java.util.concurrent.atomic.AtomicBoolean warmUpStarted =
@@ -99,7 +99,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         childrenCache.clear();
         parentsCache.clear();
         equivalentsCache.clear();
-        grandchildrenPrefetched.clear();
+        leafCache.clear();
         // definedByGenus is NOT cleared here: it is expensive and graph-derived, so it survives a
         // spurious setOntologies and is rebuilt by definedByGenus() only when the graph changes.
         warmUpStarted.set(false);
@@ -152,28 +152,26 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         boolean hit = childrenCache.containsKey(object);
         Set<OWLClass> children = childrenCache.get(object);
         if (children == null) {
-            children = object.equals(thing)
-                    ? runClassQuery(thingChildrenQuery(), "c")
-                    : fetchChildren(object);
+            children = object.equals(thing) ? fetchRoots() : fetchChildren(object);
             childrenCache.put(object, children);
         }
-        long tFetch = System.currentTimeMillis();
-        boolean prefetched = false;
-        if (!children.isEmpty() && grandchildrenPrefetched.add(object)) {
-            cacheChildrenOf(children);
-            prefetched = true;
-        }
-        long tPrefetch = System.currentTimeMillis();
         prefetchLabels(children);
         long dt = System.currentTimeMillis() - t0;
-        if (dt > 300) {
-            logger.info("[perf] getChildren({}) {}ms total = fetch {}ms + prefetchKids {}ms + labels {}ms; "
-                    + "{} children, cacheHit={}, prefetched={}",
-                    object.isOWLThing() ? "owl:Thing" : object.getIRI().getShortForm(), dt,
-                    (tFetch - t0), (tPrefetch - tFetch), (System.currentTimeMillis() - tPrefetch),
-                    children.size(), hit, prefetched);
+        if (dt > 200) {
+            logger.info("[perf] getChildren({}) {}ms: {} children, cacheHit={}",
+                    object.isOWLThing() ? "owl:Thing" : object.getIRI().getShortForm(), dt, children.size(), hit);
         }
         return children;
+    }
+
+    // Whether a class is a leaf, from the flag cached when its parent's children were fetched (via the
+    // per-child EXISTS in the children query). Empty => the tree loads children to decide (fallback for
+    // a node reached without going through its parent). This lets the tree draw a node's children's
+    // +boxes without loading the grandchildren.
+    @Override
+    public java.util.Optional<Boolean> isLeaf(OWLClass object) {
+        Boolean leaf = leafCache.get(object);
+        return leaf == null ? java.util.Optional.empty() : java.util.Optional.of(leaf);
     }
 
     // Batch-prime the display labels of a set of classes in one query, so the tree's sibling sort
@@ -189,64 +187,67 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         LazyLabelCache.getInstance().prefetch(iris);
     }
 
-    private String thingChildrenQuery() {
-        // Children of owl:Thing = named classes with no named superclass and no named genus
-        // (the roots/orphans), mirroring AssertedClassHierarchyProvider's terminal elements.
+    // owl:Thing's children = the roots (named classes with no named superclass and no named genus),
+    // each tagged by an EXISTS with whether it has an asserted subclass, so their +boxes need no
+    // grandchild load.
+    private Set<OWLClass> fetchRoots() {
+        Set<OWLClass> roots = new HashSet<>();
+        for (String[] row : store.selectPairsCsv(rootsLeafQuery())) {
+            recordChild(roots, row);
+        }
+        return roots;
+    }
+
+    private String rootsLeafQuery() {
+        String g = store.graph();
         return PREFIXES
-              + "SELECT DISTINCT ?c WHERE { GRAPH <" + store.graph() + "> { "
+              + "SELECT ?c (EXISTS { GRAPH <" + g + "> { ?gc rdfs:subClassOf ?c . "
+              + "    FILTER(?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) } } AS ?h) "
+              + "WHERE { GRAPH <" + g + "> { "
               + "  ?c rdf:type owl:Class . "
               + "  FILTER(isIRI(?c) && ?c != owl:Thing && ?c != owl:Nothing && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
               + "  FILTER NOT EXISTS { ?c rdfs:subClassOf ?sup . FILTER(isIRI(?sup) && ?sup != owl:Thing) } "
               + "  FILTER NOT EXISTS { ?c owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . "
-              + "                      ?l rdf:rest*/rdf:first ?g . FILTER(isIRI(?g)) } "
+              + "                      ?l rdf:rest*/rdf:first ?gg . FILTER(isIRI(?gg)) } "
               + "} }";
     }
 
-    // Fetch a class's direct children: its asserted named subclasses plus the defined classes whose
-    // genus is it (from the genus index). No prefetch here -- getUnfilteredChildren primes the next
-    // level in bulk for all siblings at once.
+    // A class's direct children in one query, N rows: asserted named subclasses each carrying an
+    // EXISTS leaf flag, plus the defined classes whose genus is it (from the genus index). No
+    // grandchildren are fetched -- the flags drive the children's +boxes via isLeaf().
     private Set<OWLClass> fetchChildren(OWLClass parent) {
-        Set<OWLClass> children = new HashSet<>(runClassQuery(subclassChildrenQuery(parent.getIRI().toString()), "c"));
-        children.addAll(definedChildren(parent));
+        Set<OWLClass> children = new HashSet<>();
+        for (String[] row : store.selectPairsCsv(subclassChildrenQuery(parent.getIRI().toString()))) {
+            recordChild(children, row);
+        }
+        for (OWLClass defChild : definedChildren(parent)) {
+            children.add(defChild);
+            // A defined class is a leaf unless it is itself the genus of another defined class.
+            leafCache.putIfAbsent(defChild, !isGenus(defChild));
+        }
         return children;
     }
 
-    // Prime the child set of every class in 'parents' with ONE VALUES-bound subClassOf query plus the
-    // genus index, so their +box lookups are cache hits instead of a SPARQL round-trip each. This is
-    // the bulk core: clicking owl:Thing primes all ~21 roots' children (hundreds of rows) in a single
-    // query rather than one fetch per root. putIfAbsent leaves any already-authoritative set in place.
-    private void cacheChildrenOf(Set<OWLClass> parents) {
-        long t0 = System.currentTimeMillis();
-        java.util.List<String[]> rows = store.selectPairsCsv(subclassGrandchildrenQuery(parents));
-        long tFetch = System.currentTimeMillis();
-        Map<OWLClass, Set<OWLClass>> childrenByParent = new HashMap<>();
-        for (String[] row : rows) {
-            if (row[0] == null || row[1] == null) {
-                continue;
-            }
-            childrenByParent.computeIfAbsent(df.getOWLClass(IRI.create(row[0])), k -> new HashSet<>())
-                    .add(df.getOWLClass(IRI.create(row[1])));
+    // Add a (child IRI, hasAssertedSubclass flag) CSV row to 'children' and record its leaf status: a
+    // class is a leaf iff it has no asserted subclass AND is not a genus of a defined class.
+    private void recordChild(Set<OWLClass> children, String[] row) {
+        if (row[0] == null || row[0].isEmpty()) {
+            return;
         }
-        for (OWLClass parent : parents) {
-            Set<OWLClass> defined = definedChildren(parent);
-            if (!defined.isEmpty()) {
-                childrenByParent.computeIfAbsent(parent, k -> new HashSet<>()).addAll(defined);
-            }
-        }
-        for (OWLClass parent : parents) {
-            childrenCache.putIfAbsent(parent, childrenByParent.getOrDefault(parent, Collections.emptySet()));
-        }
-        long tBuild = System.currentTimeMillis();
-        if (tBuild - t0 > 150) {
-            logger.info("[perf] cacheChildrenOf {} parents, {} rows: fetch {}ms + build {}ms",
-                    parents.size(), rows.size(), (tFetch - t0), (tBuild - tFetch));
-        }
+        OWLClass c = df.getOWLClass(IRI.create(row[0]));
+        children.add(c);
+        boolean hasAssertedKids = row.length > 1 && ("1".equals(row[1]) || "true".equalsIgnoreCase(row[1]));
+        leafCache.put(c, !hasAssertedKids && !isGenus(c));
+    }
+
+    private boolean isGenus(OWLClass c) {
+        return definedByGenus().containsKey(c.getIRI().toString());
     }
 
     // Defined classes whose genus (a named conjunct of their equivalentClass intersection) is parent,
     // from the once-built genus index. This replaces the reverse list path (?l rdf:rest*/rdf:first
     // <parent>, parent bound as OBJECT over many VALUES anchors), which made Virtuoso's cost estimator
-    // reject the grandchildren query on the full graph ("estimated execution time exceeds the limit").
+    // reject the query on the full graph ("estimated execution time exceeds the limit").
     private Set<OWLClass> definedChildren(OWLClass parent) {
         Set<String> iris = definedByGenus().get(parent.getIRI().toString());
         if (iris == null || iris.isEmpty()) {
@@ -259,28 +260,17 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         return out;
     }
 
-    // A class's asserted named subclasses (the defined-class children come from the genus index). No
-    // isIRI filter: it is redundant with the skolem STRSTARTS exclusion and skews Virtuoso's estimate
-    // into a 42000 cost-limit rejection.
+    // A class's asserted named subclasses, each with a per-child EXISTS flag for whether IT has an
+    // asserted subclass (its leaf status, combined with the genus index in recordChild). No isIRI
+    // filter: redundant with the skolem STRSTARTS exclusion, and it skews Virtuoso's cost estimate.
     private String subclassChildrenQuery(String parentIri) {
+        String g = store.graph();
         return PREFIXES
-              + "SELECT DISTINCT ?c WHERE { GRAPH <" + store.graph() + "> { "
+              + "SELECT ?c (EXISTS { GRAPH <" + g + "> { ?gc rdfs:subClassOf ?c . "
+              + "    FILTER(?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) } } AS ?h) "
+              + "WHERE { GRAPH <" + g + "> { "
               + "  ?c rdfs:subClassOf <" + parentIri + "> "
               + "  FILTER(?c != <" + parentIri + "> && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
-              + "} }";
-    }
-
-    // The asserted named subclasses of a known set of classes, bound by VALUES.
-    private String subclassGrandchildrenQuery(Set<OWLClass> classes) {
-        StringBuilder values = new StringBuilder();
-        for (OWLClass c : classes) {
-            values.append('<').append(c.getIRI()).append("> ");
-        }
-        return PREFIXES
-              + "SELECT DISTINCT ?c ?gc WHERE { GRAPH <" + store.graph() + "> { "
-              + "  VALUES ?c { " + values + "} "
-              + "  ?gc rdfs:subClassOf ?c "
-              + "  FILTER(?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) "
               + "} }";
     }
 
@@ -470,12 +460,19 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     private boolean updateChildEdge(OWLClass sub, OWLClass sup, boolean add) {
         Set<OWLClass> kids = childrenCache.get(sup);
         if (kids == null) {
+            // sup's children not fetched yet; still fix its leaf flag so its +box appears on add.
+            if (add) {
+                leafCache.put(sup, false);
+            } else {
+                leafCache.remove(sup);
+            }
             return false;
         }
         Set<OWLClass> updated = new HashSet<>(kids);
         boolean changed = add ? updated.add(sub) : updated.remove(sub);
         if (changed) {
             childrenCache.put(sup, updated);
+            leafCache.put(sup, updated.isEmpty());
         }
         return changed;
     }
