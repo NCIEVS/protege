@@ -21,11 +21,20 @@ public final class TripleStoreContext {
     private volatile String endpoint = System.getProperty("nci.tripleStore.url", DEFAULT_ENDPOINT);
     private volatile String graph = System.getProperty("nci.tripleStore.graph");
 
+    // Callbacks run when a project graph is configured (open-from-server), so the lazy read model can
+    // warm its caches during open rather than on the first click.
+    private final java.util.List<Runnable> onConfigure = new java.util.concurrent.CopyOnWriteArrayList<>();
+
     private TripleStoreContext() {
     }
 
     public static TripleStoreContext getInstance() {
         return INSTANCE;
+    }
+
+    /** Register a callback invoked each time {@link #configure} sets a graph. */
+    public void onConfigure(Runnable callback) {
+        onConfigure.add(callback);
     }
 
     /** Point the lazy read model at a project's named graph (called on open-from-server). */
@@ -34,6 +43,16 @@ public final class TripleStoreContext {
             this.endpoint = endpoint;
         }
         this.graph = graph;
+        if (graph != null && !graph.isEmpty()) {
+            for (Runnable r : onConfigure) {
+                try {
+                    r.run();
+                }
+                catch (RuntimeException e) {
+                    // A warm-up callback failing must not break project open.
+                }
+            }
+        }
     }
 
     /** Clear the target so the lazy read model goes dormant again (e.g. project closed). */

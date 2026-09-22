@@ -2,6 +2,7 @@ package org.protege.editor.owl.model.hierarchy;
 
 import org.protege.editor.owl.model.triplestore.LazyLabelCache;
 import org.protege.editor.owl.model.triplestore.LazyTripleStore;
+import org.protege.editor.owl.model.triplestore.TripleStoreContext;
 import org.semanticweb.owlapi.model.AddAxiom;
 import org.semanticweb.owlapi.model.IRI;
 import org.semanticweb.owlapi.model.OWLAxiom;
@@ -58,8 +59,9 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     private final Map<OWLClass, Set<OWLClass>> parentsCache = new ConcurrentHashMap<>();
     private final Map<OWLClass, Set<OWLClass>> equivalentsCache = new ConcurrentHashMap<>();
 
-    // genus -> defined classes index, built once from the whole graph; see definedByGenus().
-    private volatile Map<OWLClass, Set<OWLClass>> definedByGenus;
+    // genus IRI -> defined-class IRIs (strings, to avoid ~74k OWLClass/IRI allocations while building
+    // the whole index; converted to OWLClass per-parent on lookup). See definedByGenus().
+    private volatile Map<String, Set<String>> definedByGenus;
 
     // Nodes whose children have already had their own children primed (the one-level-ahead +box
     // prefetch), so re-expanding a node does not re-run the bulk sibling prefetch.
@@ -79,6 +81,9 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         this.df = manager.getOWLDataFactory();
         this.thing = df.getOWLThing();
         manager.addOntologyChangeListener(ontologyListener);
+        // Warm the caches during open-from-server (graph configured), well before the tree is
+        // clickable, so the first expansion does not pay the genus-index build.
+        TripleStoreContext.getInstance().onConfigure(this::maybeWarmUp);
     }
 
     @Override
@@ -232,7 +237,15 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // <parent>, parent bound as OBJECT over many VALUES anchors), which made Virtuoso's cost estimator
     // reject the grandchildren query on the full graph ("estimated execution time exceeds the limit").
     private Set<OWLClass> definedChildren(OWLClass parent) {
-        return definedByGenus().getOrDefault(parent, Collections.emptySet());
+        Set<String> iris = definedByGenus().get(parent.getIRI().toString());
+        if (iris == null || iris.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<OWLClass> out = new HashSet<>(iris.size() * 2);
+        for (String iri : iris) {
+            out.add(df.getOWLClass(IRI.create(iri)));
+        }
+        return out;
     }
 
     // A class's asserted named subclasses (the defined-class children come from the genus index). No
@@ -263,8 +276,8 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // genus -> defined classes that name it as a conjunct of their equivalentClass intersection. Built
     // once (forward direction, ~0.5s over the full graph) and cached, so per-node children lookups
     // never issue the reverse list path Virtuoso cannot plan. Reset by clearCaches() on refresh.
-    private Map<OWLClass, Set<OWLClass>> definedByGenus() {
-        Map<OWLClass, Set<OWLClass>> map = definedByGenus;
+    private Map<String, Set<String>> definedByGenus() {
+        Map<String, Set<String>> map = definedByGenus;
         if (map == null) {
             synchronized (this) {
                 map = definedByGenus;
@@ -277,8 +290,8 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         return map;
     }
 
-    private Map<OWLClass, Set<OWLClass>> buildDefinedByGenus() {
-        Map<OWLClass, Set<OWLClass>> map = new HashMap<>();
+    private Map<String, Set<String>> buildDefinedByGenus() {
+        Map<String, Set<String>> map = new HashMap<>();
         if (!store.isConfigured()) {
             return map;
         }
@@ -289,13 +302,13 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
               + "  FILTER(?def != ?genus "
               + "    && !STRSTARTS(STR(?def), \"urn:skolem:\") && !STRSTARTS(STR(?genus), \"urn:skolem:\")) "
               + "} }";
-        // CSV fast path: this returns ~37k IRI pairs and rdf4j's per-row parsing dominated (~2.7s).
+        // CSV fast path + string keys: ~37k IRI pairs; both rdf4j per-row parsing and eager OWLClass/IRI
+        // allocation dominated, so keep IRIs as strings here and convert per-parent in definedChildren.
         for (String[] row : store.selectPairsCsv(query)) {
             if (row[0] == null || row[1] == null) {
                 continue;
             }
-            map.computeIfAbsent(df.getOWLClass(IRI.create(row[1])), k -> new HashSet<>())
-                    .add(df.getOWLClass(IRI.create(row[0])));
+            map.computeIfAbsent(row[1], k -> new HashSet<>()).add(row[0]);
         }
         logger.info("[perf] buildDefinedByGenus {}ms: {} genus keys", (System.currentTimeMillis() - t0), map.size());
         return map;
