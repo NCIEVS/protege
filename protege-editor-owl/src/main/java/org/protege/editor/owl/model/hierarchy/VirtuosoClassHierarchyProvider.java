@@ -216,8 +216,11 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // the bulk core: clicking owl:Thing primes all ~21 roots' children (hundreds of rows) in a single
     // query rather than one fetch per root. putIfAbsent leaves any already-authoritative set in place.
     private void cacheChildrenOf(Set<OWLClass> parents) {
+        long t0 = System.currentTimeMillis();
+        java.util.List<String[]> rows = store.selectPairsCsv(subclassGrandchildrenQuery(parents));
+        long tFetch = System.currentTimeMillis();
         Map<OWLClass, Set<OWLClass>> childrenByParent = new HashMap<>();
-        for (String[] row : store.selectPairsCsv(subclassGrandchildrenQuery(parents))) {
+        for (String[] row : rows) {
             if (row[0] == null || row[1] == null) {
                 continue;
             }
@@ -232,6 +235,11 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         }
         for (OWLClass parent : parents) {
             childrenCache.putIfAbsent(parent, childrenByParent.getOrDefault(parent, Collections.emptySet()));
+        }
+        long tBuild = System.currentTimeMillis();
+        if (tBuild - t0 > 150) {
+            logger.info("[perf] cacheChildrenOf {} parents, {} rows: fetch {}ms + build {}ms",
+                    parents.size(), rows.size(), (tFetch - t0), (tBuild - tFetch));
         }
     }
 
