@@ -85,9 +85,14 @@ public final class LazyClassLoader {
             return;
         }
         try {
-            int count = materialise(fetchMolecule(classIri), editorKit);
+            long t0 = System.currentTimeMillis();
+            org.eclipse.rdf4j.model.Model molecule = fetchMolecule(classIri);
+            long t1 = System.currentTimeMillis();
+            int count = materialise(molecule, editorKit);
             loaded.add(classIri);
-            logger.info("Lazily loaded {} axioms for {}", count, classIri);
+            logger.info("Lazily loaded {} axioms for {} ({} triples) in {}ms = fetch {}ms + parse {}ms",
+                    count, classIri, molecule.size(), (System.currentTimeMillis() - t0),
+                    (t1 - t0), (System.currentTimeMillis() - t1));
         } catch (Exception e) {
             logger.error("Failed to lazily load class {}", classIri, e);
         }

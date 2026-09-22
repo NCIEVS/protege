@@ -15,6 +15,8 @@ import org.semanticweb.owlapi.model.OWLOntologyChange;
 import org.semanticweb.owlapi.model.OWLOntologyChangeListener;
 import org.semanticweb.owlapi.model.OWLOntologyManager;
 import org.semanticweb.owlapi.model.OWLSubClassOfAxiom;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +41,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * read path is a later decision.
  */
 public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyProvider<OWLClass> {
+
+    private static final Logger logger = LoggerFactory.getLogger(VirtuosoClassHierarchyProvider.class);
 
     private static final String PREFIXES =
             "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> "
@@ -111,8 +115,12 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
             if (!store.isConfigured()) {
                 return;
             }
+            long t0 = System.currentTimeMillis();
             definedByGenus();
+            long t1 = System.currentTimeMillis();
             getUnfilteredChildren(thing);
+            logger.info("[perf] warmUp done: genusIndex {}ms, roots {}ms",
+                    (t1 - t0), (System.currentTimeMillis() - t1));
         }
         catch (Exception e) {
             // Warm-up is a pure optimisation; the first interaction will simply do the work on demand.
@@ -132,6 +140,8 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         if (!store.isConfigured()) {
             return Collections.emptySet();
         }
+        long t0 = System.currentTimeMillis();
+        boolean hit = childrenCache.containsKey(object);
         Set<OWLClass> children = childrenCache.get(object);
         if (children == null) {
             children = object.equals(thing)
@@ -139,14 +149,22 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
                     : fetchChildren(object);
             childrenCache.put(object, children);
         }
-        // Prime each child's own children once, in a single bulk query, so this expansion's per-child
-        // +box lookups (getChildren on every child) are cache hits instead of a SPARQL round-trip each
-        // -- the "one level ahead" prefetch. Uniform for owl:Thing: clicking it was ~40 serial queries
-        // (a fetch per root) and is now the roots query plus one bulk children query.
+        long tFetch = System.currentTimeMillis();
+        boolean prefetched = false;
         if (!children.isEmpty() && grandchildrenPrefetched.add(object)) {
             cacheChildrenOf(children);
+            prefetched = true;
         }
+        long tPrefetch = System.currentTimeMillis();
         prefetchLabels(children);
+        long dt = System.currentTimeMillis() - t0;
+        if (dt > 300) {
+            logger.info("[perf] getChildren({}) {}ms total = fetch {}ms + prefetchKids {}ms + labels {}ms; "
+                    + "{} children, cacheHit={}, prefetched={}",
+                    object.isOWLThing() ? "owl:Thing" : object.getIRI().getShortForm(), dt,
+                    (tFetch - t0), (tPrefetch - tFetch), (System.currentTimeMillis() - tPrefetch),
+                    children.size(), hit, prefetched);
+        }
         return children;
     }
 
@@ -264,19 +282,22 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         if (!store.isConfigured()) {
             return map;
         }
+        long t0 = System.currentTimeMillis();
         String query = PREFIXES
               + "SELECT ?def ?genus WHERE { GRAPH <" + store.graph() + "> { "
               + "  ?def owl:equivalentClass ?e . ?e owl:intersectionOf ?l . ?l rdf:rest*/rdf:first ?genus . "
               + "  FILTER(?def != ?genus "
               + "    && !STRSTARTS(STR(?def), \"urn:skolem:\") && !STRSTARTS(STR(?genus), \"urn:skolem:\")) "
               + "} }";
-        for (String[] row : store.selectPairs(query, "def", "genus")) {
+        // CSV fast path: this returns ~37k IRI pairs and rdf4j's per-row parsing dominated (~2.7s).
+        for (String[] row : store.selectPairsCsv(query)) {
             if (row[0] == null || row[1] == null) {
                 continue;
             }
             map.computeIfAbsent(df.getOWLClass(IRI.create(row[1])), k -> new HashSet<>())
                     .add(df.getOWLClass(IRI.create(row[0])));
         }
+        logger.info("[perf] buildDefinedByGenus {}ms: {} genus keys", (System.currentTimeMillis() - t0), map.size());
         return map;
     }
 
