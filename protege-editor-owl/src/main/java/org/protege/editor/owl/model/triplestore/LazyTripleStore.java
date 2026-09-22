@@ -203,11 +203,35 @@ public final class LazyTripleStore {
         return rowsOut;
     }
 
-    // Fast path for a large two-column result of IRIs: fetch text/csv directly over HTTP and parse it,
-    // avoiding rdf4j's per-row BindingSet/Value overhead (~2.7s vs ~1s for a 37k-row genus index).
-    // Assumes both columns are IRIs (no embedded commas/quotes), which holds for the genus index.
+    // Fast path for hot tree queries: fetch text/csv directly over HTTP and parse it, avoiding rdf4j's
+    // ~0.5s per-query overhead (measured: a small children query is ~5ms via curl vs ~470ms via rdf4j).
+    // Assumes cells are IRIs (no embedded commas/quotes/newlines), which holds for the hierarchy queries.
     public java.util.List<String[]> selectPairsCsv(String query) {
         java.util.List<String[]> out = new java.util.ArrayList<>();
+        for (String line : csvRows(query)) {
+            String[] pair = parseCsvIriPair(line);
+            if (pair != null) {
+                out.add(pair);
+            }
+        }
+        return out;
+    }
+
+    /** Single-column IRI result over the CSV fast path (see {@link #selectPairsCsv}). */
+    public Set<String> selectValuesCsv(String query) {
+        Set<String> out = new HashSet<>();
+        for (String line : csvRows(query)) {
+            String v = parseCsvValue(line);
+            if (v != null) {
+                out.add(v);
+            }
+        }
+        return out;
+    }
+
+    // POST the query asking for text/csv and return the data rows (header dropped); empty on error.
+    private java.util.List<String> csvRows(String query) {
+        java.util.List<String> rows = new java.util.ArrayList<>();
         java.net.HttpURLConnection conn = null;
         try {
             byte[] body = ("query=" + java.net.URLEncoder.encode(query, "UTF-8") + "&format=csv")
@@ -226,10 +250,7 @@ public final class LazyTripleStore {
                 r.readLine(); // header row
                 String line;
                 while ((line = r.readLine()) != null) {
-                    String[] pair = parseCsvIriPair(line);
-                    if (pair != null) {
-                        out.add(pair);
-                    }
+                    rows.add(line);
                 }
             }
         } catch (Exception e) {
@@ -239,7 +260,18 @@ public final class LazyTripleStore {
                 conn.disconnect();
             }
         }
-        return out;
+        return rows;
+    }
+
+    // A single Virtuoso CSV cell: "value" (quoted) or bare. IRIs carry no embedded quote/comma.
+    private static String parseCsvValue(String line) {
+        if (line.isEmpty()) {
+            return null;
+        }
+        if (line.length() >= 2 && line.charAt(0) == '"' && line.endsWith("\"")) {
+            return line.substring(1, line.length() - 1);
+        }
+        return line;
     }
 
     // Virtuoso CSV renders each cell quoted: "a","b". IRIs carry no embedded quote/comma, so a two-IRI

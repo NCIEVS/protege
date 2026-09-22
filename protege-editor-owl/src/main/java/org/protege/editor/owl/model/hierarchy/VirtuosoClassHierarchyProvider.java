@@ -62,6 +62,8 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // genus IRI -> defined-class IRIs (strings, to avoid ~74k OWLClass/IRI allocations while building
     // the whole index; converted to OWLClass per-parent on lookup). See definedByGenus().
     private volatile Map<String, Set<String>> definedByGenus;
+    // The graph the index was built for; the index survives clearCaches and rebuilds only on a change.
+    private volatile String definedByGenusGraph;
 
     // Nodes whose children have already had their own children primed (the one-level-ahead +box
     // prefetch), so re-expanding a node does not re-run the bulk sibling prefetch.
@@ -98,7 +100,8 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         parentsCache.clear();
         equivalentsCache.clear();
         grandchildrenPrefetched.clear();
-        definedByGenus = null;
+        // definedByGenus is NOT cleared here: it is expensive and graph-derived, so it survives a
+        // spurious setOntologies and is rebuilt by definedByGenus() only when the graph changes.
         warmUpStarted.set(false);
     }
 
@@ -214,7 +217,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // query rather than one fetch per root. putIfAbsent leaves any already-authoritative set in place.
     private void cacheChildrenOf(Set<OWLClass> parents) {
         Map<OWLClass, Set<OWLClass>> childrenByParent = new HashMap<>();
-        for (String[] row : store.selectPairs(subclassGrandchildrenQuery(parents), "c", "gc")) {
+        for (String[] row : store.selectPairsCsv(subclassGrandchildrenQuery(parents))) {
             if (row[0] == null || row[1] == null) {
                 continue;
             }
@@ -277,14 +280,15 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // once (forward direction, ~0.5s over the full graph) and cached, so per-node children lookups
     // never issue the reverse list path Virtuoso cannot plan. Reset by clearCaches() on refresh.
     private Map<String, Set<String>> definedByGenus() {
+        String g = store.graph();
         Map<String, Set<String>> map = definedByGenus;
-        if (map == null) {
+        if (map == null || !java.util.Objects.equals(g, definedByGenusGraph)) {
             synchronized (this) {
-                map = definedByGenus;
-                if (map == null) {
-                    map = buildDefinedByGenus();
-                    definedByGenus = map;
+                if (definedByGenus == null || !java.util.Objects.equals(g, definedByGenusGraph)) {
+                    definedByGenus = buildDefinedByGenus();
+                    definedByGenusGraph = g;
                 }
+                map = definedByGenus;
             }
         }
         return map;
@@ -372,7 +376,8 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
 
     private Set<OWLClass> runClassQuery(String query, String var) {
         Set<OWLClass> result = new HashSet<>();
-        for (String value : store.selectValues(query, var)) {
+        // CSV fast path (single projected column): rdf4j added ~0.5s per query even for tiny results.
+        for (String value : store.selectValuesCsv(query)) {
             result.add(df.getOWLClass(IRI.create(value)));
         }
         return result;
