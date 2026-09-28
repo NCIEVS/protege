@@ -52,6 +52,9 @@ public final class LazyClassLoader {
 
     private static final String SKOLEM_PREFIX = "urn:skolem:";
     private static final int SCHEMA_SEED_BATCH = 200;
+    // Safety cap on the reverse skolem walk (a defined-class intersection list is at most a few
+    // dozen conjuncts deep); prevents a runaway if the graph is malformed.
+    private static final int REVERSE_WALK_LIMIT = 50;
     private static final String RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
     private static final String RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#";
     private static final String OWL_NS = "http://www.w3.org/2002/07/owl#";
@@ -96,6 +99,98 @@ public final class LazyClassLoader {
         } catch (Exception e) {
             logger.error("Failed to lazily load class {}", classIri, e);
         }
+    }
+
+    /**
+     * Materialise into the active ontology every named class that references {@code entity} as a
+     * subclass child, an object-property role filler ({@code R some/only entity}), or an
+     * object-valued association target, so an in-RAM {@code getReferencingAxioms(entity)} sees the
+     * full reference closure. In the lazy model the active ontology holds only browsed classes, so a
+     * merge/retire reference retargeting would otherwise silently miss references on unbrowsed
+     * classes. No-op unless the lazy model is active.
+     *
+     * @param associationProps IRIs of the object-valued association (annotation) properties; the
+     *   predicate set must be bound -- a variable-predicate reverse lookup is orders of magnitude
+     *   slower on the full graph.
+     */
+    public void ensureReferencingClassesLoaded(OWLClass entity, OWLEditorKit editorKit,
+                                               java.util.Collection<String> associationProps) {
+        if (!isActive() || entity == null || entity.isOWLThing() || entity.isOWLNothing()) {
+            return;
+        }
+        String e = entity.getIRI().toString();
+        try {
+            Set<String> owners = new HashSet<>();
+            owners.addAll(subclassChildrenOf(e));
+            owners.addAll(roleFillerOwnersOf(e));
+            owners.addAll(associationSourcesOf(e, associationProps));
+            owners.remove(e);
+            OWLDataFactory df = editorKit.getOWLModelManager().getOWLDataFactory();
+            for (String iri : owners) {
+                ensureLoaded(df.getOWLClass(org.semanticweb.owlapi.model.IRI.create(iri)), editorKit);
+            }
+            logger.info("Primed {} referencing classes of {} for reference retargeting", owners.size(), e);
+        } catch (Exception ex) {
+            logger.error("Failed to prime referencing classes of {}", e, ex);
+        }
+    }
+
+    // Named classes that assert {@code entity} as a direct superclass.
+    private Set<String> subclassChildrenOf(String entity) {
+        return store.selectValuesCsv(LazyTripleStore.PREFIXES
+                + "SELECT ?c WHERE { GRAPH <" + store.graph() + "> { ?c rdfs:subClassOf <" + entity
+                + "> FILTER(isIRI(?c) && !STRSTARTS(STR(?c), \"" + SKOLEM_PREFIX + "\")) } }");
+    }
+
+    // Named classes carrying an object-valued association whose value is {@code entity}. The
+    // predicate set is bound via VALUES: a variable predicate on a bound object is ~1000x slower.
+    private Set<String> associationSourcesOf(String entity, java.util.Collection<String> associationProps) {
+        if (associationProps == null || associationProps.isEmpty()) {
+            return Collections.emptySet();
+        }
+        StringBuilder values = new StringBuilder();
+        for (String p : associationProps) {
+            values.append('<').append(p).append("> ");
+        }
+        return store.selectValuesCsv("SELECT ?c WHERE { GRAPH <" + store.graph() + "> { VALUES ?p { "
+                + values + "} ?c ?p <" + entity + "> "
+                + "FILTER(isIRI(?c) && !STRSTARTS(STR(?c), \"" + SKOLEM_PREFIX + "\")) } }");
+    }
+
+    // Named classes that use {@code entity} as an object-property role filler ({@code R some/only
+    // entity}), found by a bounded reverse skolem walk: seed on the restriction nodes, then follow
+    // {@code ?s ?p ?x} up the per-axiom skolem structure (list/intersection nodes) to the owning
+    // named class. Anchored VALUES steps are used instead of an inverse property path, which Virtuoso
+    // cost-rejects on the full graph. All bnodes of one axiom share a skolem hash, so the walk stays
+    // within the axiom and terminates at its named subject.
+    private Set<String> roleFillerOwnersOf(String entity) {
+        Set<String> owners = new HashSet<>();
+        Set<String> frontier = store.selectValuesCsv(LazyTripleStore.PREFIXES
+                + "SELECT ?r WHERE { GRAPH <" + store.graph() + "> { "
+                + "{ ?r owl:someValuesFrom <" + entity + "> } UNION { ?r owl:allValuesFrom <" + entity
+                + "> } } }");
+        Set<String> seen = new HashSet<>(frontier);
+        int guard = 0;
+        while (!frontier.isEmpty() && guard++ < REVERSE_WALK_LIMIT) {
+            StringBuilder values = new StringBuilder();
+            for (String n : frontier) {
+                values.append('<').append(n).append("> ");
+            }
+            Set<String> parents = store.selectValuesCsv("SELECT DISTINCT ?s WHERE { GRAPH <"
+                    + store.graph() + "> { VALUES ?x { " + values + "} ?s ?p ?x } }");
+            Set<String> nextSkolem = new HashSet<>();
+            for (String p : parents) {
+                if (p.startsWith(SKOLEM_PREFIX)) {
+                    if (seen.add(p)) {
+                        nextSkolem.add(p);
+                    }
+                } else {
+                    owners.add(p);
+                }
+            }
+            frontier = nextSkolem;
+        }
+        return owners;
     }
 
     /**
