@@ -78,6 +78,23 @@ public final class LazyClassLoader {
         return store.isConfigured();
     }
 
+    /**
+     * Whether the given IRI is present (as a subject) in the project graph. Returns false when the
+     * lazy model is inactive. For existence checks that the sparse in-RAM signature cannot answer
+     * (a class exists in the store but has not been materialised).
+     */
+    public boolean containsEntity(org.semanticweb.owlapi.model.IRI iri) {
+        if (!isActive() || iri == null) {
+            return false;
+        }
+        try {
+            return store.ask("ASK { GRAPH <" + store.graph() + "> { <" + iri + "> ?p ?o } }");
+        } catch (Exception e) {
+            logger.error("Existence check failed for {}", iri, e);
+            return false;
+        }
+    }
+
     /** Ensure the class's axioms are present in the active ontology (no-op if already loaded). */
     public void ensureLoaded(OWLClass cls, OWLEditorKit editorKit) {
         if (!isActive() || cls == null || cls.isOWLThing() || cls.isOWLNothing()) {
