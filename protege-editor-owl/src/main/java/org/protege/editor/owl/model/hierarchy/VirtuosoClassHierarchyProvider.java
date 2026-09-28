@@ -83,6 +83,13 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         this.df = manager.getOWLDataFactory();
         this.thing = df.getOWLThing();
         manager.addOntologyChangeListener(ontologyListener);
+        registerWarmUp();
+    }
+
+    // Register the open-time background warm-up (genus index + roots) so the first tree interaction
+    // does not pay the genus-index build. Overridden to a no-op by the transient sub-hierarchy
+    // provider (filler picker), which must not prefetch owl:Thing's roots or accumulate callbacks.
+    protected void registerWarmUp() {
         // Warm the caches during open-from-server (graph configured), well before the tree is
         // clickable, so the first expansion does not pay the genus-index build.
         TripleStoreContext.getInstance().onConfigure(this::maybeWarmUp);
@@ -455,18 +462,26 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
         }
     }
 
-    // Add/remove a child edge in the cached child set of sup; returns whether the set actually changed
-    // (false when sup is not cached, or the edge was already present/absent).
+    // Add/remove a child edge in the cached child set of sup; returns whether the tree should be
+    // notified (the set changed, or sup's children were freshly fetched to merge in a local add).
     private boolean updateChildEdge(OWLClass sub, OWLClass sup, boolean add) {
         Set<OWLClass> kids = childrenCache.get(sup);
+        boolean fetched = false;
         if (kids == null) {
-            // sup's children not fetched yet; still fix its leaf flag so its +box appears on add.
-            if (add) {
-                leafCache.put(sup, false);
-            } else {
-                leafCache.remove(sup);
+            if (!add || !store.isConfigured()) {
+                // A remove (or no store): just fix the leaf flag; re-query happens on demand.
+                if (add) {
+                    leafCache.put(sup, false);
+                } else {
+                    leafCache.remove(sup);
+                }
+                return false;
             }
-            return false;
+            // Adding a child to a parent whose branch was never opened: fetch its committed children
+            // so the local (still-uncommitted) child merges in -- otherwise a later fetch caches a
+            // stale set that misses it, and the new class does not appear until an app restart.
+            kids = getUnfilteredChildren(sup);
+            fetched = true;
         }
         Set<OWLClass> updated = new HashSet<>(kids);
         boolean changed = add ? updated.add(sub) : updated.remove(sub);
@@ -474,6 +489,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
             childrenCache.put(sup, updated);
             leafCache.put(sup, updated.isEmpty());
         }
-        return changed;
+        // Force a node-changed after a fresh fetch so the previously unopened parent re-renders.
+        return changed || fetched;
     }
 }

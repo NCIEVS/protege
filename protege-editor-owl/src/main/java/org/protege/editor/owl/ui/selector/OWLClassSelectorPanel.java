@@ -18,6 +18,7 @@ import org.protege.editor.core.ui.workspace.Workspace;
 import org.protege.editor.owl.OWLEditorKit;
 import org.protege.editor.owl.model.hierarchy.AssertedClassSubHierarchyProvider;
 import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProvider;
+import org.protege.editor.owl.model.hierarchy.RootableClassHierarchyProvider;
 import org.protege.editor.owl.ui.renderer.OWLSystemColors;
 import org.protege.editor.owl.ui.tree.OWLTreeDragAndDropHandler;
 import org.protege.editor.owl.ui.view.AbstractOWLEntityHierarchyViewComponent;
@@ -135,7 +136,7 @@ public class OWLClassSelectorPanel extends AbstractHierarchySelectorPanel<OWLCla
     }
     
     public void setTreeRoot(OWLClass root) {
-    	AssertedClassSubHierarchyProvider sap =  (AssertedClassSubHierarchyProvider) getHierarchyProvider();
+    	RootableClassHierarchyProvider sap = (RootableClassHierarchyProvider) getHierarchyProvider();
     	sap.setRoot(root);
     	vc.refreshTree();
     	

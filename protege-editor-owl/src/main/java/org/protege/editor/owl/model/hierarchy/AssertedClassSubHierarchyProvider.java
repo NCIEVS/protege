@@ -11,7 +11,8 @@ import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyManager;
 import org.semanticweb.owlapi.model.parameters.Imports;
 
-public class AssertedClassSubHierarchyProvider extends AssertedClassHierarchyProvider {
+public class AssertedClassSubHierarchyProvider extends AssertedClassHierarchyProvider
+		implements RootableClassHierarchyProvider {
 
 	public AssertedClassSubHierarchyProvider(OWLOntologyManager owlOntologyManager) {
 		super(owlOntologyManager);		

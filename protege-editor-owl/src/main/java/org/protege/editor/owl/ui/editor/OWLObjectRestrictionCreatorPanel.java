@@ -1,6 +1,8 @@
 package org.protege.editor.owl.ui.editor;
 
 import org.protege.editor.owl.model.hierarchy.AssertedClassSubHierarchyProvider;
+import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProvider;
+import org.protege.editor.owl.model.hierarchy.VirtuosoClassSubHierarchyProvider;
 import org.protege.editor.owl.model.hierarchy.FilteredOWLObjectPropertyHierarchyProvider;
 import org.protege.editor.owl.model.hierarchy.OWLObjectPropertyHierarchyProvider;
 import org.protege.editor.owl.ui.selector.AbstractHierarchySelectorPanel;
@@ -94,8 +96,11 @@ public class OWLObjectRestrictionCreatorPanel extends AbstractRestrictionCreator
 
 
     protected AbstractSelectorPanel<OWLClass> createFillerSelectorPanel() {
-    	AssertedClassSubHierarchyProvider ac = 
-    			new AssertedClassSubHierarchyProvider(getOWLEditorKit().getOWLModelManager().getOWLOntologyManager());
+    	// Lazy model: use the Virtuoso-backed sub-hierarchy so the filler tree populates on demand;
+    	// the asserted provider would show only classes already materialised in the sparse ontology.
+    	OWLObjectHierarchyProvider<OWLClass> ac = Boolean.getBoolean("nci.lazyHierarchy")
+    			? new VirtuosoClassSubHierarchyProvider(getOWLEditorKit().getOWLModelManager().getOWLOntologyManager())
+    			: new AssertedClassSubHierarchyProvider(getOWLEditorKit().getOWLModelManager().getOWLOntologyManager());
     	ac.setOntologies(getOWLEditorKit().getModelManager().getActiveOntologies());
         return new OWLClassSelectorPanel(getOWLEditorKit(), false, ac);
     }
