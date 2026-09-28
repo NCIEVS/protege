@@ -158,13 +158,17 @@ public final class LazyTripleStore {
     }
 
     public boolean ask(String query) {
-        try (RepositoryConnection conn = getConnection()) {
-            BooleanQuery ask = conn.prepareBooleanQuery(QueryLanguage.SPARQL, query);
-            return ask.evaluate();
-        } catch (Exception e) {
-            logger.error("ASK failed (returning false): {}", query, e);
-            return false;
+        // The endpoint rejects rdf4j's boolean-query content negotiation (HTTP 406), so run the ASK
+        // over the same HttpURLConnection CSV path as the SELECT queries. Virtuoso answers with a
+        // one-cell "bool" CSV (1 / 0).
+        for (String row : csvRows(query)) {
+            java.util.List<String> cells = splitCsv(row);
+            if (!cells.isEmpty()) {
+                String v = cells.get(0).trim();
+                return v.equals("1") || v.equalsIgnoreCase("true");
+            }
         }
+        return false;
     }
 
     /** Runs a CONSTRUCT and returns the resulting triples (empty model on error). */

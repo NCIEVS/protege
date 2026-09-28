@@ -88,11 +88,39 @@ public final class LazyClassLoader {
             return false;
         }
         try {
-            return store.ask("ASK { GRAPH <" + store.graph() + "> { <" + iri + "> ?p ?o } }");
+            // CSV fast path, not rdf4j ASK: the SPARQLRepository boolean-query content negotiation is
+            // rejected by the endpoint (HTTP 406); the HttpURLConnection CSV path is what the tree uses.
+            return !store.selectValuesCsv("SELECT ?p WHERE { GRAPH <" + store.graph() + "> { <"
+                    + iri + "> ?p ?o } } LIMIT 1").isEmpty();
         } catch (Exception e) {
             logger.error("Existence check failed for {}", iri, e);
             return false;
         }
+    }
+
+    /**
+     * Whether any subject in the project graph carries {@code property} with a literal whose lexical
+     * value equals {@code value}, case-insensitively. Returns false when the lazy model is inactive.
+     * A synchronous store lookup (no async callback), so it is safe to call from the EDT.
+     */
+    public boolean hasLiteralValue(org.semanticweb.owlapi.model.IRI property, String value) {
+        if (!isActive() || property == null || value == null) {
+            return false;
+        }
+        try {
+            // CSV fast path (not rdf4j ASK, which the endpoint rejects with HTTP 406).
+            return !store.selectValuesCsv("SELECT ?s WHERE { GRAPH <" + store.graph() + "> { ?s <"
+                    + property + "> ?o . FILTER(LCASE(STR(?o)) = \"" + sparqlEscape(value.toLowerCase())
+                    + "\") } } LIMIT 1").isEmpty();
+        } catch (Exception e) {
+            logger.error("Literal-value existence check failed for {} = {}", property, value, e);
+            return false;
+        }
+    }
+
+    private static String sparqlEscape(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+                .replace("\r", "\\r").replace("\t", "\\t");
     }
 
     /** Ensure the class's axioms are present in the active ontology (no-op if already loaded). */
