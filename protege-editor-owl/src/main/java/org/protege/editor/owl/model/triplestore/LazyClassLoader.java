@@ -123,6 +123,53 @@ public final class LazyClassLoader {
                 .replace("\r", "\\r").replace("\t", "\\t");
     }
 
+    /**
+     * The class whose {@code rdfs:label} equals {@code rendering} case-insensitively, or null. Lets
+     * the entity finder resolve a typed/selected class name that the sparse in-RAM signature misses
+     * under lazy. Synchronous store lookup, safe on the EDT.
+     */
+    public OWLClass classByLabel(OWLDataFactory df, String rendering) {
+        if (!isActive() || df == null || rendering == null || rendering.isEmpty()) {
+            return null;
+        }
+        try {
+            Set<String> iris = store.selectValuesCsv("SELECT ?s WHERE { GRAPH <" + store.graph()
+                    + "> { ?s <" + RDFS_NS + "label> ?o . FILTER(LCASE(STR(?o)) = \""
+                    + sparqlEscape(rendering.toLowerCase()) + "\") } } LIMIT 1");
+            for (String iri : iris) {
+                return df.getOWLClass(org.semanticweb.owlapi.model.IRI.create(iri));
+            }
+            return null;
+        } catch (Exception e) {
+            logger.error("classByLabel lookup failed for {}", rendering, e);
+            return null;
+        }
+    }
+
+    /**
+     * Classes whose {@code rdfs:label} starts with {@code prefix} (case-insensitive), capped at
+     * {@code limit}. Backs lazy class autocomplete; callers gate on a minimum prefix length so a
+     * keystroke cannot trigger an unbounded label scan.
+     */
+    public Set<OWLClass> classesByLabelPrefix(OWLDataFactory df, String prefix, int limit) {
+        if (!isActive() || df == null || prefix == null || prefix.isEmpty()) {
+            return Collections.emptySet();
+        }
+        try {
+            Set<String> iris = store.selectValuesCsv("SELECT ?s WHERE { GRAPH <" + store.graph()
+                    + "> { ?s <" + RDFS_NS + "label> ?o . FILTER(STRSTARTS(LCASE(STR(?o)), \""
+                    + sparqlEscape(prefix.toLowerCase()) + "\")) } } LIMIT " + Math.max(1, limit));
+            Set<OWLClass> result = new HashSet<>();
+            for (String iri : iris) {
+                result.add(df.getOWLClass(org.semanticweb.owlapi.model.IRI.create(iri)));
+            }
+            return result;
+        } catch (Exception e) {
+            logger.error("classesByLabelPrefix lookup failed for {}", prefix, e);
+            return Collections.emptySet();
+        }
+    }
+
     /** Ensure the class's axioms are present in the active ontology (no-op if already loaded). */
     public void ensureLoaded(OWLClass cls, OWLEditorKit editorKit) {
         if (!isActive() || cls == null || cls.isOWLThing() || cls.isOWLNothing()) {

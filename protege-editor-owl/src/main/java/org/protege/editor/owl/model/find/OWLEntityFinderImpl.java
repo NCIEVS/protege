@@ -2,6 +2,8 @@ package org.protege.editor.owl.model.find;
 
 import org.protege.editor.owl.model.OWLModelManagerImpl;
 import org.protege.editor.owl.model.cache.OWLEntityRenderingCache;
+import org.protege.editor.owl.model.triplestore.LazyClassLoader;
+import org.protege.editor.owl.model.triplestore.TripleStoreContext;
 import org.protege.editor.owl.model.util.OWLDataTypeUtils;
 import org.semanticweb.owlapi.model.*;
 import org.slf4j.Logger;
@@ -34,6 +36,10 @@ public class OWLEntityFinderImpl implements OWLEntityFinder {
 
     private static final String WILDCARD = "*";
 
+    // Lazy class autocomplete: minimum fragment length before a store prefix scan, and result cap.
+    private static final int LAZY_MIN_PREFIX = 3;
+    private static final int LAZY_MATCH_LIMIT = 30;
+
 
     public OWLEntityFinderImpl(OWLModelManagerImpl mngr, OWLEntityRenderingCache renderingCache) {
         this.mngr = mngr;
@@ -47,6 +53,10 @@ public class OWLEntityFinderImpl implements OWLEntityFinder {
         OWLClass cls = renderingCache.getOWLClass(rendering);
         if (cls == null && !rendering.startsWith(ESCAPE_CHAR) && !rendering.endsWith(ESCAPE_CHAR)){
             cls = renderingCache.getOWLClass(ESCAPE_CHAR + rendering + ESCAPE_CHAR);
+        }
+        if (cls == null && TripleStoreContext.getInstance().isActive()) {
+            // Lazy: the rendering cache only holds materialised classes; resolve via the store.
+            cls = LazyClassLoader.getInstance().classByLabel(mngr.getOWLDataFactory(), rendering);
         }
         return cls;
     }
@@ -253,11 +263,36 @@ public class OWLEntityFinderImpl implements OWLEntityFinder {
             return Collections.emptySet();
         }
 
-        if (fullRegExp) {
-            return doRegExpSearch(match, type, flags);
+        Set<T> results = fullRegExp ? doRegExpSearch(match, type, flags) : doWildcardSearch(match, type);
+        augmentWithLazyClasses(match, type, fullRegExp, results);
+        return results;
+    }
+
+    /**
+     * Under lazy the rendering cache only holds materialised classes, so a prefix search misses most
+     * of the ontology. Augment class (and generic entity) matches with a store label-prefix lookup,
+     * gated on a minimum fragment length to bound the scan. Regex searches are left untouched.
+     */
+    @SuppressWarnings("unchecked")
+    private <T extends OWLEntity> void augmentWithLazyClasses(String match, Class<T> type, boolean fullRegExp, Set<T> results) {
+        if (fullRegExp || !TripleStoreContext.getInstance().isActive()) {
+            return;
         }
-        else {
-            return doWildcardSearch(match, type);
+        if (!OWLClass.class.isAssignableFrom(type) && !type.equals(OWLEntity.class)) {
+            return;
+        }
+        String prefix = match;
+        while (prefix.startsWith(WILDCARD)) {
+            prefix = prefix.substring(1);
+        }
+        while (prefix.endsWith(WILDCARD)) {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+        if (prefix.length() < LAZY_MIN_PREFIX) {
+            return;
+        }
+        for (OWLClass c : LazyClassLoader.getInstance().classesByLabelPrefix(mngr.getOWLDataFactory(), prefix, LAZY_MATCH_LIMIT)) {
+            results.add((T) c);
         }
     }
 
