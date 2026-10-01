@@ -102,23 +102,26 @@ public class OWLCellRendererSimple implements TreeCellRenderer, ListCellRenderer
     private void boldIfNecessary(Object value, JLabel renderer) {
         if(value instanceof OWLEntity) {
             OWLEntity ent = (OWLEntity) value;
+            // Lazy model: the active ontology is a sparse per-entity cache, so getAxioms misses an
+            // unbrowsed entity; under lazy a displayed class/property/individual is backed by the store.
+            boolean lazy = org.protege.editor.owl.model.triplestore.TripleStoreContext.getInstance().isActive();
             if(ent instanceof OWLClass) {
-                if(!owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLClass) ent).isEmpty()) {
+                if(lazy || !owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLClass) ent).isEmpty()) {
                     makeBold(renderer);
                 }
             }
             else if(ent instanceof OWLObjectProperty) {
-                if(!owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLObjectProperty) ent).isEmpty()) {
+                if(lazy || !owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLObjectProperty) ent).isEmpty()) {
                     makeBold(renderer);
                 }
             }
             else if(ent instanceof OWLDataProperty) {
-                if(!owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLDataProperty) ent).isEmpty()) {
+                if(lazy || !owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLDataProperty) ent).isEmpty()) {
                     makeBold(renderer);
                 }
             }
             else if(ent instanceof OWLIndividual) {
-                if(!owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLIndividual) ent).isEmpty()) {
+                if(lazy || !owlEditorKit.getModelManager().getActiveOntology().getAxioms((OWLIndividual) ent).isEmpty()) {
                     makeBold(renderer);
                 }
             }

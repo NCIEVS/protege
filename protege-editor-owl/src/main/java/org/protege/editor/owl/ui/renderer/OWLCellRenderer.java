@@ -499,6 +499,13 @@ public class OWLCellRenderer implements TableCellRenderer, TreeCellRenderer, Lis
                 ontology = getOWLModelManager().getActiveOntology();
             }
             entity.accept(activeEntityVisitor);
+            // Lazy model: the active in-RAM ontology is a sparse per-entity cache, so getAxioms misses
+            // an unbrowsed entity; under lazy every displayed entity is backed by the store, so render
+            // it as having statements (bold/enabled) rather than plain.
+            if (ontology == null
+                    && org.protege.editor.owl.model.triplestore.TripleStoreContext.getInstance().isActive()) {
+                ontology = getOWLModelManager().getActiveOntology();
+            }
             if (OWLUtilities.isDeprecated(getOWLModelManager(), entity)) {
                 setStrikeThrough(true);
             }
