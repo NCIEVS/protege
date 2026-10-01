@@ -1,8 +1,18 @@
 package org.protege.editor.owl.client.action;
 
+import java.awt.BorderLayout;
+import java.awt.Dialog;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
+import javax.swing.BorderFactory;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 import org.protege.editor.owl.client.ClientSession;
 import org.protege.editor.owl.client.LocalHttpClient;
@@ -38,11 +48,66 @@ public class ClassifyOnServerAction extends AbstractClientAction {
         final LocalHttpClient client = (LocalHttpClient) session.getActiveClient();
         final ProjectId pid = session.getActiveProject();
 
-        // Classification of a large project can take a while server-side; run off the EDT.
-        submit(() -> {
-            final String status = client.classifyProject(pid);
-            SwingUtilities.invokeLater(() -> reportStatus(status));
+        // Modeless so the EDT main loop stays free; we drive the bar ourselves (the native
+        // indeterminate animation does not run on this macOS/LnF) by bouncing a determinate value.
+        final JProgressBar bar = new JProgressBar(0, 100);
+        final JDialog progress = createProgressDialog(bar);
+        final Timer sweep = new Timer(40, new ActionListener() {
+            private int value = 0;
+            private int step = 3;
+
+            @Override
+            public void actionPerformed(ActionEvent ev) {
+                value += step;
+                if (value >= 100) {
+                    value = 100;
+                    step = -step;
+                } else if (value <= 0) {
+                    value = 0;
+                    step = -step;
+                }
+                bar.setValue(value);
+            }
         });
+        progress.setVisible(true);
+        sweep.start();
+        submit(() -> {
+            String status;
+            try {
+                status = client.classifyProject(pid);
+                if (status == null) {
+                    status = "error";
+                }
+            } catch (Exception ex) {
+                logger.error("Server classification failed", ex);
+                status = "error";
+            }
+            final String outcome = status;
+            SwingUtilities.invokeLater(() -> {
+                sweep.stop();
+                progress.dispose();
+                reportStatus(outcome);
+            });
+        });
+    }
+
+    // A non-cancellable, always-on-top modeless dialog holding the given progress bar: the server
+    // cannot be stopped mid-run so there is nothing to cancel; it clears when classifyProject returns.
+    private JDialog createProgressDialog(JProgressBar bar) {
+        JPanel panel = new JPanel(new BorderLayout(12, 12));
+        panel.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+        panel.add(new JLabel("Classifying on server \u2014 this can take several minutes\u2026"),
+                BorderLayout.NORTH);
+        panel.add(bar, BorderLayout.CENTER);
+        Window parent = SwingUtilities.getWindowAncestor(getOWLEditorKit().getWorkspace());
+        JDialog dialog = new JDialog(parent, "Classify on server", Dialog.ModalityType.MODELESS);
+        dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+        dialog.setAlwaysOnTop(true);
+        dialog.setContentPane(panel);
+        dialog.pack();
+        dialog.setResizable(false);
+        dialog.setLocationRelativeTo(parent);
+        return dialog;
     }
 
     private void reportStatus(String status) {
