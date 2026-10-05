@@ -37,6 +37,10 @@
     	<appender-ref ref="rolling-files"/>
     </logger>   
 
+    <!-- Classify phase timers (-Dnci.classify.timers=true) log at INFO; keep them visible even when
+         the root level is raised (e.g. protege.logging.level=error). -->
+    <logger name="gov.nih.nci.curator" level="info"/>
+
    
     <root level="${protege.logging.level:-info}">        
         <appender-ref ref="stdout"/>

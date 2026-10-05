@@ -355,8 +355,12 @@ public class MetaprojectHandler extends BaseRoutingHandler {
 	// is never touched; the inferred graph reflects this classify until the next one.
 	private void classifyProject(ProjectId projectId, OutputStream os) throws ServerException {
 		try {
+			long tMat = System.currentTimeMillis();
 			OWLOntology ontology = projections.materializeHead(projectId);
+			long matMs = System.currentTimeMillis() - tMat;
 			int head = projections.headRevision(projectId);
+			logger.info("Classify {}: materialized head r{} ({} axioms, {} classes) in {} ms",
+					projectId, head, ontology.getAxiomCount(), ontology.getClassesInSignature().size(), matMs);
 			String status = projections.classify(projectId, ontology, head);
 			ObjectOutputStream oos = new ObjectOutputStream(os);
 			oos.writeObject(status);
