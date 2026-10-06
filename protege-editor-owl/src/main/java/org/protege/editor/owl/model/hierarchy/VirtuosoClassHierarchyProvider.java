@@ -207,12 +207,14 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
 
     private String rootsLeafQuery() {
         String g = store.graph();
+        // No STRSTARTS/isIRI on ?c: Virtuoso's cost estimator over-weights STR()/STRSTARTS across the
+        // full owl:Class scan (estimates >10000s and rejects the query). Skolem rows are dropped in
+        // recordChild instead.
         return PREFIXES
-              + "SELECT ?c (EXISTS { GRAPH <" + g + "> { ?gc rdfs:subClassOf ?c . "
-              + "    FILTER(?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) } } AS ?h) "
+              + "SELECT ?c (EXISTS { GRAPH <" + g + "> { ?gc rdfs:subClassOf ?c . FILTER(?gc != ?c) } } AS ?h) "
               + "WHERE { GRAPH <" + g + "> { "
               + "  ?c rdf:type owl:Class . "
-              + "  FILTER(isIRI(?c) && ?c != owl:Thing && ?c != owl:Nothing && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
+              + "  FILTER(?c != owl:Thing && ?c != owl:Nothing) "
               + "  FILTER NOT EXISTS { ?c rdfs:subClassOf ?sup . FILTER(isIRI(?sup) && ?sup != owl:Thing) } "
               + "  FILTER NOT EXISTS { ?c owl:equivalentClass ?eq . ?eq owl:intersectionOf ?l . "
               + "                      ?l rdf:rest*/rdf:first ?gg . FILTER(isIRI(?gg)) } "
@@ -238,7 +240,7 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // Add a (child IRI, hasAssertedSubclass flag) CSV row to 'children' and record its leaf status: a
     // class is a leaf iff it has no asserted subclass AND is not a genus of a defined class.
     private void recordChild(Set<OWLClass> children, String[] row) {
-        if (row[0] == null || row[0].isEmpty()) {
+        if (row[0] == null || row[0].isEmpty() || row[0].startsWith("urn:skolem:")) {
             return;
         }
         OWLClass c = df.getOWLClass(IRI.create(row[0]));
@@ -272,12 +274,12 @@ public class VirtuosoClassHierarchyProvider extends AbstractOWLObjectHierarchyPr
     // filter: redundant with the skolem STRSTARTS exclusion, and it skews Virtuoso's cost estimate.
     private String subclassChildrenQuery(String parentIri) {
         String g = store.graph();
+        // Skolem rows dropped in recordChild (see rootsLeafQuery): keeps STRSTARTS out of the scan.
         return PREFIXES
-              + "SELECT ?c (EXISTS { GRAPH <" + g + "> { ?gc rdfs:subClassOf ?c . "
-              + "    FILTER(?gc != ?c && !STRSTARTS(STR(?gc), \"urn:skolem:\")) } } AS ?h) "
+              + "SELECT ?c (EXISTS { GRAPH <" + g + "> { ?gc rdfs:subClassOf ?c . FILTER(?gc != ?c) } } AS ?h) "
               + "WHERE { GRAPH <" + g + "> { "
               + "  ?c rdfs:subClassOf <" + parentIri + "> "
-              + "  FILTER(?c != <" + parentIri + "> && !STRSTARTS(STR(?c), \"urn:skolem:\")) "
+              + "  FILTER(?c != <" + parentIri + ">) "
               + "} }";
     }
 
