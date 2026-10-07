@@ -111,19 +111,28 @@ class ServerProjections {
 			repository.initialize();
 			SparqlStore store = new SparqlStore(repository, graph);
 			long tWrite = System.currentTimeMillis();
-			// Atomic graph replace via the CRUD PUT endpoint (TTLP bulk parser): ~1s for the full
-			// inferred graph vs ~60s for CLEAR + 500-triple SPARQL INSERT batches. The revision marker
-			// lives in a separate meta graph, so advance it afterwards.
+			// Rewrite the inferred graph as CLEAR + bulk-POST batches, the same path the full load
+			// uses. A single CRUD PUT of the whole inferred graph is one giant insert transaction that
+			// overran Virtuoso and crashed it at ~242k triples; bounded per-POST batches each commit on
+			// their own. The revision marker lives in a separate meta graph, so advance it afterwards.
+			store.clearGraph();
+			String crudEndpoint = graphCrudEndpoint(tripleStoreUrl);
 			ChangesetRdf.Renderer renderer = new ChangesetRdf.Renderer();
-			StringBuilder body = new StringBuilder();
+			StringBuilder batch = new StringBuilder();
+			int buffered = 0;
 			long total = 0;
 			for (OWLAxiom axiom : outcome.getInferredAxioms()) {
 				for (Triple triple : renderer.render(axiom)) {
-					body.append(triple.toNTriple()).append('\n');
-					total++;
+					batch.append(triple.toNTriple()).append('\n');
+					buffered++;
+				}
+				if (buffered >= TRIPLESTORE_BATCH) {
+					total += postTriples(crudEndpoint, graph, batch, buffered, projectId);
+					batch.setLength(0);
+					buffered = 0;
 				}
 			}
-			putGraph(graphCrudEndpoint(tripleStoreUrl), graph, body, total, projectId);
+			total += postTriples(crudEndpoint, graph, batch, buffered, projectId);
 			store.apply(new RdfChangeSet(Collections.<Triple>emptySet(), Collections.<Triple>emptySet()), revision);
 			logger.info("Classified project {}: wrote {} inferred triples to <{}> at revision {} in {} ms",
 					projectId, total, graph, revision, System.currentTimeMillis() - tWrite);
@@ -251,41 +260,6 @@ class ServerProjections {
 		catch (Exception e) {
 			logger.error("Triple store bulk POST of " + count + " triples failed for " + projectId
 					+ "; continuing", e);
-			return 0;
-		}
-		finally {
-			if (conn != null) {
-				conn.disconnect();
-			}
-		}
-	}
-
-	// Replace a graph's entire contents in one atomic CRUD PUT (Virtuoso's TTLP bulk parser). Far
-	// faster than CLEAR + INSERT for a derived graph rebuilt from scratch (measured ~1s vs ~60s for
-	// the inferred graph). The revision marker lives in a separate meta graph and is set by the caller.
-	private long putGraph(String crudEndpoint, String graph, CharSequence ntriples, long count,
-			ProjectId projectId) {
-		HttpURLConnection conn = null;
-		try {
-			URL url = new URL(crudEndpoint + "?graph-uri=" + URLEncoder.encode(graph, "UTF-8"));
-			conn = (HttpURLConnection) url.openConnection();
-			conn.setRequestMethod("PUT");
-			conn.setDoOutput(true);
-			conn.setRequestProperty("Content-Type", "text/plain");
-			byte[] body = ntriples.toString().getBytes(StandardCharsets.UTF_8);
-			conn.setFixedLengthStreamingMode(body.length);
-			try (OutputStream os = conn.getOutputStream()) {
-				os.write(body);
-			}
-			int code = conn.getResponseCode();
-			if (code >= 200 && code < 300) {
-				return count;
-			}
-			logger.error("Inferred graph PUT of {} triples failed for {}: HTTP {}", count, projectId, code);
-			return 0;
-		}
-		catch (Exception e) {
-			logger.error("Inferred graph PUT of " + count + " triples failed for " + projectId, e);
 			return 0;
 		}
 		finally {
