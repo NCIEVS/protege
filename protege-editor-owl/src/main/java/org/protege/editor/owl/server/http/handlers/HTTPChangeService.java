@@ -144,15 +144,13 @@ public class HTTPChangeService extends BaseRoutingHandler {
 
 		String requestPath = exchange.getRequestPath();
 		if (HTTPServer.server().isPaused()) {
-			List<String> allowedPausedEndpoints = Lists.newArrayList(ServerEndpoints.COMMIT, ServerEndpoints.SQUASH,
-					ServerEndpoints.LATEST_CHANGES);
-			if (allowedPausedEndpoints.contains(requestPath)) {
-				User user = this.getAuthToken(exchange).getUser();
-				PauseAllowed ccs = PauseAllowed.create(projectId(exchange), user, requestPath);
-				if (!ccs.ok()) {
-					throw new ServerException(StatusCodes.SERVICE_UNAVAILABLE, ccs.message());
-				}
-			} else {
+			User user = this.getAuthToken(exchange).getUser();
+			// While paused, the pausing manager runs the whole baseline process (reopen -> review ->
+			// adjust version -> squash -> commit), so they need every endpoint -- including HEAD, which
+			// the client's reopen calls. Everyone else gets only the read-only change feed (so their
+			// auto-update poll does not error) and is otherwise locked out.
+			if (!HTTPServer.server().isPausingUser(user)
+					&& !ServerEndpoints.LATEST_CHANGES.equals(requestPath)) {
 				throw new ServerException(StatusCodes.SERVICE_UNAVAILABLE, PauseAllowed.SERVER_PAUSED.message());
 			}
 		}
