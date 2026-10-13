@@ -19,6 +19,8 @@ import org.protege.editor.owl.server.classify.OntologyClassifier;
 import org.protege.editor.owl.server.index.ProjectIndexBuilder;
 import org.protege.editor.owl.server.versioning.ChangeHistoryUtils;
 import org.protege.editor.owl.server.versioning.api.ChangeHistory;
+import org.semanticweb.owlapi.model.IRI;
+import org.semanticweb.owlapi.model.OWLAnnotation;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLOntology;
 import org.semanticweb.owlapi.model.OWLOntologyChange;
@@ -189,6 +191,15 @@ class ServerProjections {
 						.append("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ")
 						.append("<http://www.w3.org/2002/07/owl#Ontology> .\n");
 				buffered++;
+				// Ontology-level annotations (owl:versionInfo, publish date, ...) are not axioms, so
+				// render them explicitly or they never reach the graph and the lazy client can't show them.
+				IRI ontologyIriObject = ont.getOntologyID().getOntologyIRI().get();
+				for (OWLAnnotation annotation : ont.getAnnotations()) {
+					for (Triple triple : renderer.renderOntologyAnnotation(ontologyIriObject, annotation)) {
+						batch.append(triple.toNTriple()).append('\n');
+						buffered++;
+					}
+				}
 			}
 			for (OWLAxiom axiom : ont.getAxioms()) {
 				for (Triple triple : renderer.render(axiom)) {

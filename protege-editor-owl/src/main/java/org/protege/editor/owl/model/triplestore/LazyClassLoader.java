@@ -14,6 +14,8 @@ import org.eclipse.rdf4j.rio.Rio;
 import org.protege.editor.owl.OWLEditorKit;
 import org.protege.editor.owl.client.SessionRecorder;
 import org.protege.editor.owl.model.OWLModelManager;
+import org.semanticweb.owlapi.model.AddOntologyAnnotation;
+import org.semanticweb.owlapi.model.OWLAnnotation;
 import org.semanticweb.owlapi.model.OWLAxiom;
 import org.semanticweb.owlapi.model.OWLClass;
 import org.semanticweb.owlapi.model.OWLDataFactory;
@@ -312,6 +314,7 @@ public final class LazyClassLoader {
                     + "owl:DatatypeProperty, rdfs:Datatype)) } }", "s");
             int count = materialise(fetchClosure(seeds), editorKit);
             declareStandardAnnotationProperties(editorKit);
+            ensureOntologyAnnotationsLoaded(editorKit);
             schemaLoaded = true;
             schemaOntology = active;
             logger.info("Lazily loaded schema: {} axioms from {} entities", count, seeds.size());
@@ -339,6 +342,49 @@ public final class LazyClassLoader {
             modelManager.getOWLOntologyManager().addAxioms(target, declarations.stream());
         } finally {
             recorder.startRecording();
+        }
+    }
+
+    /**
+     * Load the ontology-header annotations (e.g. owl:versionInfo and the publish date that the NCI
+     * squash/publish routine edits) from the triple store into the active ontology, recording paused.
+     * Under the lazy model the active ontology is created empty, so without this the Ontology
+     * Annotations view shows nothing and a modeler re-adds annotations that already exist in the
+     * graph, producing duplicates on commit. Reconstructed through owl-rdf-io so the literal
+     * (datatype/language) matches the stored triple and a later edit's delete matches it.
+     */
+    private void ensureOntologyAnnotationsLoaded(OWLEditorKit editorKit) {
+        OWLModelManager modelManager = editorKit.getOWLModelManager();
+        OWLOntology active = modelManager.getActiveOntology();
+        if (!active.getOntologyID().getOntologyIRI().isPresent()) {
+            return;
+        }
+        String ontologyIri = active.getOntologyID().getOntologyIRI().get().toString();
+        Model molecule = directTriples(java.util.Collections.singletonList(ontologyIri));
+        if (molecule.isEmpty()) {
+            return;
+        }
+        try {
+            Model prepared = deskolemise(molecule);
+            declareAnnotationProperties(prepared);
+            OWLOntology reconstructed = OwlRdfIO.load(new ByteArrayInputStream(toRdfXml(prepared)));
+            SessionRecorder recorder = SessionRecorder.getInstance(editorKit);
+            recorder.stopRecording();
+            try {
+                int added = 0;
+                for (OWLAnnotation annotation : reconstructed.getAnnotations()) {
+                    if (!active.getAnnotations().contains(annotation)) {
+                        modelManager.getOWLOntologyManager()
+                                .applyChange(new AddOntologyAnnotation(active, annotation));
+                        added++;
+                    }
+                }
+                logger.info("Lazily loaded {} ontology header annotation(s)", added);
+            } finally {
+                recorder.startRecording();
+            }
+        } catch (Exception e) {
+            logger.error("Failed to load ontology header annotations", e);
         }
     }
 
