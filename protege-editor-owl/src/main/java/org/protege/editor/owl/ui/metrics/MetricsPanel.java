@@ -3,6 +3,7 @@ package org.protege.editor.owl.ui.metrics;
 import org.protege.editor.core.ui.util.ComponentFactory;
 import org.protege.editor.owl.OWLEditorKit;
 import org.protege.editor.owl.model.OWLModelManager;
+import org.protege.editor.owl.model.triplestore.LazyMetrics;
 import org.protege.editor.owl.ui.OWLAxiomTypeFramePanel;
 import org.protege.editor.owl.ui.renderer.OWLRendererPreferences;
 import org.semanticweb.owlapi.metrics.*;
@@ -250,11 +251,44 @@ public class MetricsPanel extends JPanel {
         metrics.add(new AxiomCount(getOntology()));
         metrics.add(new LogicalAxiomCount(getOntology()));
         metrics.add(new AxiomTypeMetric(getOntology(), AxiomType.DECLARATION));
-        metrics.add(new ReferencedClassCount(getOntology()));
-        metrics.add(new ReferencedObjectPropertyCount(getOntology()));
-        metrics.add(new ReferencedDataPropertyCount(getOntology()));
-        metrics.add(new ReferencedIndividualCount(getOntology()));
-        metrics.add(new ReferencedAnnotationPropertyCount(getOntology()));
+        // Entity counts come from Virtuoso when a server project is open (the in-RAM signature is
+        // sparse under the lazy model); each falls back to the stock count otherwise. recomputeMetric
+        // is only called when the metric is dirty, so this does not re-query on every repaint.
+        metrics.add(new ReferencedClassCount(getOntology()) {
+            @Override
+            public Integer recomputeMetric() {
+                Integer n = LazyMetrics.namedClassCount();
+                return n != null ? n : super.recomputeMetric();
+            }
+        });
+        metrics.add(new ReferencedObjectPropertyCount(getOntology()) {
+            @Override
+            public Integer recomputeMetric() {
+                Integer n = LazyMetrics.owlTypeCount("ObjectProperty");
+                return n != null ? n : super.recomputeMetric();
+            }
+        });
+        metrics.add(new ReferencedDataPropertyCount(getOntology()) {
+            @Override
+            public Integer recomputeMetric() {
+                Integer n = LazyMetrics.owlTypeCount("DatatypeProperty");
+                return n != null ? n : super.recomputeMetric();
+            }
+        });
+        metrics.add(new ReferencedIndividualCount(getOntology()) {
+            @Override
+            public Integer recomputeMetric() {
+                Integer n = LazyMetrics.owlTypeCount("NamedIndividual");
+                return n != null ? n : super.recomputeMetric();
+            }
+        });
+        metrics.add(new ReferencedAnnotationPropertyCount(getOntology()) {
+            @Override
+            public Integer recomputeMetric() {
+                Integer n = LazyMetrics.owlTypeCount("AnnotationProperty");
+                return n != null ? n : super.recomputeMetric();
+            }
+        });
         metrics.add(new DLExpressivity(getOntology()));
     	/*
     	 * Degenericized to be compatible with changing OWLAPI interfaces
