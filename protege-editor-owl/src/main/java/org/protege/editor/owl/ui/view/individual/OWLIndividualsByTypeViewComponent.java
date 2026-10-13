@@ -8,6 +8,7 @@ import org.protege.editor.owl.model.hierarchy.IndividualsByTypeHierarchyProvider
 import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProvider;
 import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProviderListener;
 import org.protege.editor.owl.model.selection.SelectionDriver;
+import org.protege.editor.owl.model.triplestore.LazyEditGuard;
 import org.protege.editor.owl.model.util.OWLUtilities;
 import org.protege.editor.owl.ui.OWLIcons;
 import org.protege.editor.owl.ui.UIHelper;
@@ -160,6 +161,9 @@ public class OWLIndividualsByTypeViewComponent extends AbstractOWLSelectionViewC
     }
 
     private void addEmptyClassToList() {
+        if (LazyEditGuard.stockEditingDisabled()) {
+            return;
+        }
         UIHelper helper = new UIHelper(getOWLEditorKit());
         OWLClass cls = helper.pickOWLClass();
         if(cls != null) {
@@ -265,6 +269,9 @@ public class OWLIndividualsByTypeViewComponent extends AbstractOWLSelectionViewC
 
 
     public void createNewObject() {
+        if (LazyEditGuard.stockEditingDisabled()) {
+            return;
+        }
         OWLEntityCreationSet<OWLNamedIndividual> set = getOWLWorkspace().createOWLIndividual();
         if (set == null) {
             return;

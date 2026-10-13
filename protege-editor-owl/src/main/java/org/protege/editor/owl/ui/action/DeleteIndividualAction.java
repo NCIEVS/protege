@@ -1,6 +1,7 @@
 package org.protege.editor.owl.ui.action;
 
 import org.protege.editor.owl.OWLEditorKit;
+import org.protege.editor.owl.model.triplestore.LazyEditGuard;
 import org.protege.editor.owl.model.util.OWLEntityDeleter;
 import org.protege.editor.owl.ui.OWLIcons;
 import org.protege.editor.owl.ui.renderer.DeleteEntityIcon;
@@ -35,7 +36,7 @@ public class DeleteIndividualAction extends OWLSelectionViewAction {
 
 
     public void updateState() {
-        setEnabled(!indSetProvider.getEntities().isEmpty());
+        setEnabled(!LazyEditGuard.stockEditingDisabled() && !indSetProvider.getEntities().isEmpty());
     }
 
 

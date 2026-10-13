@@ -2,6 +2,7 @@ package org.protege.editor.owl.ui.action;
 
 import org.protege.editor.owl.OWLEditorKit;
 import org.protege.editor.owl.model.hierarchy.OWLObjectHierarchyProvider;
+import org.protege.editor.owl.model.triplestore.LazyEditGuard;
 import org.protege.editor.owl.ui.view.OWLSelectionViewAction;
 import org.semanticweb.owlapi.model.OWLEntity;
 import org.semanticweb.owlapi.util.OWLEntitySetProvider;
@@ -36,7 +37,16 @@ public abstract class AbstractDeleteEntityAction<E extends OWLEntity> extends OW
 
 
     public void updateState() {
-        setEnabled(!entitySetProvider.getEntities().isEmpty());
+        boolean guarded = applyLazyEditGuard() && LazyEditGuard.stockEditingDisabled();
+        setEnabled(!guarded && !entitySetProvider.getEntities().isEmpty());
+    }
+
+    /**
+     * Whether this action is subject to the lazy/server-mode stock-edit guard. Stock tabs leave this
+     * true; the NCI edit surface overrides it to false so its own delete stays enabled in server mode.
+     */
+    protected boolean applyLazyEditGuard() {
+        return true;
     }
 
 

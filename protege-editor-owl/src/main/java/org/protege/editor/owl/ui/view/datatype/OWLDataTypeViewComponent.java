@@ -8,6 +8,7 @@ import org.protege.editor.owl.model.event.EventType;
 import org.protege.editor.owl.model.event.OWLModelManagerChangeEvent;
 import org.protege.editor.owl.model.event.OWLModelManagerListener;
 import org.protege.editor.owl.model.selection.SelectionDriver;
+import org.protege.editor.owl.model.triplestore.LazyEditGuard;
 import org.protege.editor.owl.model.util.OWLDataTypeUtils;
 import org.protege.editor.owl.model.util.OWLEntityDeleter;
 import org.protege.editor.owl.ui.OWLIcons;
@@ -129,11 +130,17 @@ public class OWLDataTypeViewComponent extends AbstractOWLDataTypeViewComponent
 
 
     private void deleteDatatype() {
+        if (LazyEditGuard.stockEditingDisabled()) {
+            return;
+        }
         OWLEntityDeleter.deleteEntities(list.getSelectedOWLObjects(), getOWLModelManager());
     }
 
 
     private void createNewDatatype() {
+        if (LazyEditGuard.stockEditingDisabled()) {
+            return;
+        }
         OWLEntityCreationSet<OWLDatatype> set = getOWLWorkspace().createOWLDatatype();
         if (set == null) {
             return;

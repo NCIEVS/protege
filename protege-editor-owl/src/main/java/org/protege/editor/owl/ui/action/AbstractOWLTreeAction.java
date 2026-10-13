@@ -2,6 +2,7 @@ package org.protege.editor.owl.ui.action;
 
 import org.protege.editor.core.HasUpdateState;
 import org.protege.editor.core.ui.view.DisposableAction;
+import org.protege.editor.owl.model.triplestore.LazyEditGuard;
 import org.protege.editor.owl.ui.tree.OWLObjectTreeNode;
 import org.semanticweb.owlapi.model.OWLEntity;
 
@@ -42,7 +43,16 @@ public abstract class AbstractOWLTreeAction<E extends OWLEntity> extends Disposa
     public void updateState() {
         // Ask subclasses if we should be enabled for the current
         // selection
-        setEnabled(canPerform(getSelectedOWLEntity()));
+        boolean guarded = applyLazyEditGuard() && LazyEditGuard.stockEditingDisabled();
+        setEnabled(!guarded && canPerform(getSelectedOWLEntity()));
+    }
+
+    /**
+     * Whether this action is subject to the lazy/server-mode stock-edit guard. Stock tabs leave this
+     * true; the NCI edit surface overrides it to false so its own add stays enabled in server mode.
+     */
+    protected boolean applyLazyEditGuard() {
+        return true;
     }
 
     // Called on a selection history to enable/disable

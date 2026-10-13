@@ -7,6 +7,7 @@ import org.protege.editor.owl.model.event.EventType;
 import org.protege.editor.owl.model.event.OWLModelManagerChangeEvent;
 import org.protege.editor.owl.model.event.OWLModelManagerListener;
 import org.protege.editor.owl.model.selection.SelectionDriver;
+import org.protege.editor.owl.model.triplestore.LazyEditGuard;
 import org.protege.editor.owl.model.util.OWLEntityDeleter;
 import org.protege.editor.owl.ui.OWLIcons;
 import org.protege.editor.owl.ui.action.DeleteIndividualAction;
@@ -208,6 +209,9 @@ public class OWLIndividualListViewComponent extends AbstractOWLIndividualViewCom
     }
 
     protected void addIndividual() {
+        if (LazyEditGuard.stockEditingDisabled()) {
+            return;
+        }
         OWLEntityCreationSet<OWLNamedIndividual> set = getOWLWorkspace().createOWLIndividual();
         if (set == null) {
             return;
