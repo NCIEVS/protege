@@ -172,7 +172,17 @@ public class EnableAutoUpdateAction extends AbstractClientAction implements Clie
     			}
     			log.info("Checking for updates");
     			if (behindServer()) {
-    				modMan.fireEvent(EventType.SERVER_REVISION);
+    				// Dispatch on the EDT, NOT on this shared single-thread executor: firing
+    				// UPDATE_ONTOLOGY runs performUpdate -> submit(DoUpdate).get(), and DoUpdate
+    				// is queued on this same thread, so applying it here would self-deadlock.
+    				// Conflicts are caught per-entity at commit, so skip while the user has
+    				// uncommitted edits -- never replay remote changes onto in-progress work.
+    				SwingUtilities.invokeLater(() -> {
+    					if (ClientUtils.getUncommittedChanges(getSessionRecorder(),
+    							vont.getOntology(), vont.getChangeHistory()).isEmpty()) {
+    						getClientSession().fireChangeEvent(EventCategory.UPDATE_ONTOLOGY);
+    					}
+    				});
     			}
     		} catch (Throwable t) {
     			autoUpdate.cancel(false);
