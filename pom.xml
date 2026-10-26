@@ -86,6 +86,8 @@
 	<modules>
 		<module>protege-editor-core</module>
 		<module>protege-editor-owl</module>
+		<module>nci-curator</module>
+		<module>lucene-search-tab</module>
 		<module>protege-desktop</module>
 	</modules>
 	

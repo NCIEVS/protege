@@ -1,0 +1,9 @@
+Staging thesaurus
+
+Timer summary:
+Name              | Total (ms)
+==============================
+main              |     252464
+loading           |      80221
+consistency check |          0
+classification    |     142945

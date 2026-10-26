@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration scan="true" scanPeriod="10 seconds">
+
+    <appender name="stdout" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+           <Pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{0}    %msg%n</Pattern>
+        </encoder>
+    </appender>
+    
+    <appender name="files" class="ch.qos.logback.core.FileAppender">
+        <file>./logs/curator.log</file>
+        <append>true</append>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <Pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{0}    %msg%n</Pattern>
+        </encoder>
+    </appender>
+    
+    <appender name="rolling-files" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>./logs/curator.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>./logs/curator_%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>100MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <Pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{0}    %msg%n</Pattern>
+        </encoder>
+    </appender>
+    
+   
+    
+    <logger name="gov.nih.nci.curator" level="${curator.logging.level:-INFO}">
+        <appender-ref ref="stdout"/>
+    	<appender-ref ref="rolling-files"/>
+    </logger>
+   
+    
+   
+
+
+</configuration>

@@ -1,0 +1,2 @@
+gov.nih.nci.curator.version=$$VERSION
+gov.nih.nci.curator.releaseDate=$$DATE
