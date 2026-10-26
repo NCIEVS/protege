@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+
+<plugin>
+
+    <extension id="curator.reasoner.factory"
+               point="org.protege.editor.owl.inference_reasonerfactory">
+        <name value="Curator"/>
+        <class value="gov.nih.nci.curator.CuratorReasonerFactory"/>
+    </extension>
+
+    <extension id="curator.reasoner.configuration" point="org.protege.editor.owl.inference_preferences">
+        <label value="Curator"/>
+        <class value="gov.nih.nci.curator.CuratorPreferencesPanel"/>
+    </extension>
+
+    <!--
+    <extension id="CuratorExplanation"
+               point="org.protege.editor.owl.explanation">
+        <name value="Curator Explanation Service"/>
+        <class value="gov.nih.nci.curator.CuratorExplanationService"/>
+    </extension>
+    -->
+    
+</plugin>

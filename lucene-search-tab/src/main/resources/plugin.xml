@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin>
+    <extension id="SearchTabManager" point="org.protege.editor.owl.searchmanager">
+        <name value="Lucene search" />
+        <class value="edu.stanford.protege.search.lucene.tab.engine.SearchTabManager" />
+    </extension>
+    
+    <!-- Preferences -->
+    <extension id="ui.preferences.update"
+               point="org.protege.editor.core.application.preferencespanel">
+        <label value="Lucene Search"/>
+        <class value="org.protege.editor.search.lucene.SearchPreferencesPanel"/>
+    </extension>
+
+    <!-- Tabs -->
+
+    <extension id="LuceneQueryTab"
+               point="org.protege.editor.core.application.WorkspaceTab">
+        <label value="Lucene Search Tab"/>
+        <class value="org.protege.editor.owl.ui.OWLWorkspaceViewsTab"/>
+        <index value="X"/>
+        <editorKitId value="OWLEditorKit"/>
+        <defaultViewConfigFileName value="viewconfig_lst.xml"/>
+    </extension>
+
+    <!-- Views -->
+
+    <extension id="LuceneQueryView"
+               point="org.protege.editor.core.application.ViewComponent">
+        <label value="Lucene Query"/>
+        <class value="edu.stanford.protege.search.lucene.tab.ui.LuceneQueryView"/>
+        <headerColor value="@org.protege.ontologycolor"/>
+        <category value="Lucene Search Tab"/>
+    </extension>
+
+    <!-- Menus -->
+
+    <extension id="Lucene"
+               name="Top Level Lucene Menu"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+        <name value="Lucene"/>
+        <path value="/SlotG"/>
+        <editorKitId value="OWLEditorKit"/>
+    </extension>
+
+    <extension id="BuildIndex"
+               name="Build Index Menu"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+        <name value="Build index"/>
+        <path value="lucene-search-tab.Lucene/SlotA-G"/>
+        <editorKitId value="OWLEditorKit"/>
+        <class value="edu.stanford.protege.search.lucene.tab.ui.IndexAction"/>
+    </extension>
+
+    <extension id="OpenSettings"
+               name="Open Settings Menu"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+        <name value="Settings"/>
+        <path value="lucene-search-tab.Lucene/SlotB-G"/>
+        <editorKitId value="OWLEditorKit"/>
+        <class value="edu.stanford.protege.search.lucene.tab.ui.OpenSettingsAction"/>
+    </extension>
+    <extension id="ExportToCsv"
+               point="org.protege.editor.core.application.EditorKitMenuAction">
+        <name value="Export to CSV"/>
+        <class value="edu.stanford.protege.csv.export.ExportAction"/>
+        <toolTip value="Export entities to a CSV file"/>
+        <path value="org.protege.editor.owl.menu.tools/SlotQ-A"/>
+        <editorKitId value="OWLEditorKit"/>
+    </extension>
+</plugin>
