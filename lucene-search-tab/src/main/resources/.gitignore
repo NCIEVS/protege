@@ -1,0 +1,5 @@
+# plugin.xml and META-INF/services are real build inputs (OSGi extensions + SPI),
+# not generated output. Override the broad plugin.xml / META-INF ignores from the
+# repo-root and module .gitignore so new entries here can never be silently dropped.
+!plugin.xml
+!META-INF/
